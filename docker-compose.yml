@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  # Main API service
+  api:
+    build: ./backend
+    ports:
+      - "8090:8000"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - QDRANT_URL=http://qdrant:6333
+      - REDIS_URL=redis://redis:6379/0
+      - ATLASSIAN_CLIENT_ID=${ATLASSIAN_CLIENT_ID}
+      - ATLASSIAN_CLIENT_SECRET=${ATLASSIAN_CLIENT_SECRET}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - APP_ENV=development
+      - APP_DEBUG=true
+    depends_on:
+      - qdrant
+      - redis
+    restart: unless-stopped
+    networks:
+      - cortex-network
+
+  # Qdrant vector database
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant-storage:/qdrant/storage
+    restart: unless-stopped
+    networks:
+      - cortex-network
+
+  # Redis cache
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    networks:
+      - cortex-network
+    command: redis-server --appendonly yes
+
+volumes:
+  qdrant-storage:
+  redis-data:
+
+networks:
+  cortex-network:
+    driver: bridge

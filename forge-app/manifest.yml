@@ -1,0 +1,107 @@
+modules:
+  # Issue Panel - Context-aware AI assistance in issue sidebar
+  jira:issuePanel:
+    - key: cortex-context-panel
+      title: Cortex AI
+      function: contextPanelHandler
+      resource: contextPanelResource
+      resolver:
+        function: contextPanelResolver
+
+  # Global Page - Omni-search chat interface
+  jira:globalPage:
+    - key: cortex-omni-search
+      title: Cortex Search
+      function: omniSearchHandler
+      resource: omniSearchResource
+      route: /cortex/search
+
+  # Admin Page - Settings and historic data sync
+  jira:adminPage:
+    - key: cortex-admin-settings
+      title: Cortex Settings
+      function: adminSettingsHandler
+      resource: adminSettingsResource
+      route: /cortex/admin
+
+  # Webhook triggers for real-time sync (Trap 2 Fix)
+  trigger:
+    - key: issue-created-trigger
+      function: onIssueChange
+      events:
+        - avi:jira:created:issue
+
+    - key: issue-updated-trigger
+      function: onIssueChange
+      events:
+        - avi:jira:updated:issue
+
+    - key: issue-deleted-trigger
+      function: onIssueDelete
+      events:
+        - avi:jira:deleted:issue
+
+  # Functions
+  function:
+    - key: contextPanelHandler
+      handler: src/index.contextPanelHandler
+
+    - key: contextPanelResolver
+      handler: src/resolvers/context-resolver.contextResolver
+
+    - key: omniSearchHandler
+      handler: src/index.omniSearchHandler
+
+    - key: adminSettingsHandler
+      handler: src/index.adminSettingsHandler
+
+    - key: onIssueChange
+      handler: src/triggers/onIssueUpdated.onIssueChange
+
+    - key: onIssueDelete
+      handler: src/triggers/onIssueUpdated.onIssueDelete
+
+  # Resources (UI Kit 2)
+  resources:
+    - key: contextPanelResource
+      path: static/context-panel/build
+
+    - key: omniSearchResource
+      path: static/omni-search/build
+
+    - key: adminSettingsResource
+      path: static/admin-settings/build
+
+app:
+  id: ari:cloud:ecosystem::app/jira-cortex
+  name: Jira Cortex
+  runtime:
+    name: nodejs18.x
+
+permissions:
+  scopes:
+    # Read Jira data
+    - read:jira-work
+    - read:jira-user
+
+    # Write permissions for admin actions
+    - manage:jira-configuration
+
+    # Read Confluence (for wiki integration)
+    - read:confluence-content.all
+    - read:confluence-space.summary
+
+    # Storage for user preferences and config
+    - storage:app
+
+  # External API access - MUST whitelist your backend URL
+  external:
+    fetch:
+      backend:
+        # Replace with your actual production backend URL
+        - "https://jira-cortex-api.onrender.com"
+        # Development URL (remove for production)
+        - "https://localhost:8000"
+      client:
+        # Atlassian APIs
+        - "https://api.atlassian.com"

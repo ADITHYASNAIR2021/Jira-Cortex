@@ -1,0 +1,57 @@
+# Python Backend Dependencies - Production Grade
+# Jira Cortex v1.0.0
+
+# Core Framework
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+python-dotenv>=1.0.0
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+
+# AI/ML
+openai>=1.12.0
+tiktoken>=0.5.0
+
+# Vector Database
+qdrant-client>=1.7.0
+
+# Caching
+redis>=5.0.0
+
+# Security
+pyjwt[crypto]>=2.8.0
+cryptography>=42.0.0
+python-jose[cryptography]>=3.3.0
+
+# Secret Detection (Trap 3 Fix)
+detect-secrets>=1.4.0
+
+# HTTP Client
+httpx>=0.26.0
+aiohttp>=3.9.0
+
+# Text Processing
+beautifulsoup4>=4.12.0
+lxml>=5.1.0
+
+# Rate Limiting & Security
+slowapi>=0.1.9
+python-multipart>=0.0.6
+
+# Logging & Monitoring
+structlog>=24.1.0
+
+# Database (Billing)
+sqlalchemy[asyncio]==2.0.25
+asyncpg==0.29.0
+psycopg2-binary==2.9.9
+alembic>=1.13.0
+
+# Payments (Stripe)
+stripe>=7.0.0
+
+# Testing
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+pytest-cov>=4.1.0
+httpx>=0.26.0

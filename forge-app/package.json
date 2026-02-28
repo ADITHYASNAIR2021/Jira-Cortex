@@ -1,0 +1,21 @@
+{
+  "name": "jira-cortex-forge-app",
+  "version": "1.0.0",
+  "description": "Permission-aware AI intelligence layer for Jira",
+  "main": "src/index.jsx",
+  "scripts": {
+    "lint": "eslint src/",
+    "build": "forge build",
+    "deploy": "forge deploy",
+    "tunnel": "forge tunnel"
+  },
+  "dependencies": {
+    "@forge/api": "^3.0.0",
+    "@forge/bridge": "^3.0.0",
+    "@forge/resolver": "^1.5.0"
+  },
+  "devDependencies": {
+    "eslint": "^8.56.0"
+  },
+  "license": "MIT"
+}
