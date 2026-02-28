@@ -5,7 +5,7 @@ Pre-paid wallet system for tenant billing.
 Part of the "Financial Fortress" architecture.
 """
 
-from sqlalchemy import Column, String, Float, Boolean, DateTime, Integer, ForeignKey
+from sqlalchemy import Column, String, Float, Boolean, DateTime, Integer, ForeignKey, Numeric
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 
@@ -25,7 +25,7 @@ class TenantWallet(Base):
     __tablename__ = "tenant_wallets"
     
     tenant_id = Column(String(255), primary_key=True)
-    balance = Column(Float, default=0.0, nullable=False)  # Real money ($)
+    balance = Column(Numeric(10, 4), default=0.0, nullable=False)  # Real money ($)
     currency = Column(String(3), default="USD")
     
     # Subscription status (Platform Fee)
@@ -35,8 +35,8 @@ class TenantWallet(Base):
     
     # Auto-recharge settings
     auto_recharge = Column(Boolean, default=False)
-    auto_recharge_amount = Column(Float, default=100.0)  # Amount to charge when low
-    auto_recharge_threshold = Column(Float, default=10.0)  # Trigger when below this
+    auto_recharge_amount = Column(Numeric(10, 4), default=100.0)  # Amount to charge when low
+    auto_recharge_threshold = Column(Numeric(10, 4), default=10.0)  # Trigger when below this
     
     # Timestamps
     created_at = Column(DateTime, default=utc_now)
@@ -63,7 +63,7 @@ class PaymentTransaction(Base):
     tenant_id = Column(String(255), ForeignKey("tenant_wallets.tenant_id"), index=True)
     
     # Transaction details
-    amount = Column(Float, nullable=False)  # Positive = credit added, Negative = deducted
+    amount = Column(Numeric(10, 4), nullable=False)  # Positive = credit added, Negative = deducted
     type = Column(String(50), nullable=False)  # 'stripe_payment', 'usage_deduction', 'refund'
     description = Column(String(500), nullable=True)
     
@@ -72,8 +72,8 @@ class PaymentTransaction(Base):
     stripe_session_id = Column(String(255), nullable=True)
     
     # Balance snapshot for audit trail
-    balance_before = Column(Float, nullable=True)
-    balance_after = Column(Float, nullable=True)
+    balance_before = Column(Numeric(10, 4), nullable=True)
+    balance_after = Column(Numeric(10, 4), nullable=True)
     
     created_at = Column(DateTime, default=utc_now)
     
@@ -96,8 +96,8 @@ class UsageCost(Base):
     operation = Column(String(100), unique=True, nullable=False)
     
     # Cost per unit (in USD)
-    cost_per_1k_tokens = Column(Float, default=0.0)  # For token-based ops
-    cost_per_request = Column(Float, default=0.0)   # For request-based ops
+    cost_per_1k_tokens = Column(Numeric(10, 4), default=0.0)  # For token-based ops
+    cost_per_request = Column(Numeric(10, 4), default=0.0)   # For request-based ops
     
     # Metadata
     description = Column(String(500), nullable=True)

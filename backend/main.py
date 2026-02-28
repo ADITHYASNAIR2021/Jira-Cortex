@@ -19,11 +19,19 @@ from slowapi.errors import RateLimitExceeded
 
 from app.config import get_settings
 from app.routers import query, ingest, payments
-from app.services.vector_store import get_vector_store
-from app.services.cache import get_cache_service
-from app.services.llm import get_llm_service
-from app.services.billing import get_billing_service
+from app.services.vector_store import VectorStore
+from app.services.cache import CacheService
+from app.services.llm import LLMService
+from app.services.billing import BillingService
+from app.services.background_processor import BackgroundProcessor
 from app.auth.jwt_validator import get_jwt_validator, JWTValidationError
+import sentry_sdk
+
+# Initialize Sentry
+sentry_sdk.init(
+    dsn=None,  # Set via SENTRY_DSN env var
+    traces_sample_rate=1.0,
+)
 
 # Configure structured logging
 structlog.configure(
@@ -60,12 +68,16 @@ async def lifespan(app: FastAPI):
     """
     logger.info("application_starting")
     
-    settings = get_settings()
+    # Initialize App State Singletons
+    app.state.vector_store = VectorStore()
+    app.state.cache_service = CacheService()
+    app.state.llm_service = LLMService()
+    app.state.billing_service = BillingService()
+    app.state.background_processor = BackgroundProcessor()
     
     # Initialize vector store collection
     try:
-        vector_store = get_vector_store()
-        await vector_store.initialize_collection()
+        await app.state.vector_store.initialize_collection()
         logger.info("vector_store_initialized")
     except Exception as e:
         logger.error("vector_store_init_failed", error=str(e))
@@ -73,8 +85,7 @@ async def lifespan(app: FastAPI):
     
     # Verify Redis connection
     try:
-        cache = get_cache_service()
-        if await cache.health_check():
+        if await app.state.cache_service.health_check():
             logger.info("redis_connected")
         else:
             logger.warning("redis_unavailable")
@@ -83,8 +94,7 @@ async def lifespan(app: FastAPI):
     
     # Initialize billing database
     try:
-        billing = get_billing_service()
-        await billing.initialize()
+        await app.state.billing_service.initialize()
         logger.info("billing_db_initialized")
     except Exception as e:
         logger.warning("billing_init_failed", error=str(e))
@@ -92,9 +102,7 @@ async def lifespan(app: FastAPI):
     
     # Recover orphaned background jobs (Redis persistence)
     try:
-        from app.services.background_processor import get_background_processor
-        processor = get_background_processor()
-        recovered = await processor.recover_orphaned_jobs()
+        recovered = await app.state.background_processor.recover_orphaned_jobs()
         if recovered > 0:
             logger.info("orphaned_jobs_marked_failed", count=recovered)
     except Exception as e:
@@ -105,11 +113,8 @@ async def lifespan(app: FastAPI):
     # Cleanup
     logger.info("application_shutting_down")
     
-    cache = get_cache_service()
-    await cache.close()
-    
-    billing = get_billing_service()
-    await billing.close()
+    await app.state.cache_service.close()
+    await app.state.billing_service.close()
 
 
 def create_app() -> FastAPI:
@@ -197,7 +202,8 @@ All endpoints require a valid Atlassian JWT token in the Authorization header.
     @app.middleware("http")
     async def log_requests(request: Request, call_next: Callable) -> Response:
         """Log all requests with timing."""
-        request_id = request.headers.get("X-Request-ID", "")
+        import uuid
+        request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
         start_time = time.time()
         
         # Add request ID to response
@@ -217,6 +223,24 @@ All endpoints require a valid Atlassian JWT token in the Authorization header.
         response.headers["X-Process-Time"] = str(round(process_time * 1000, 2))
         
         return response
+        
+    # Timeout middleware
+    @app.middleware("http")
+    async def timeout_middleware(request: Request, call_next: Callable) -> Response:
+        import asyncio
+        try:
+            return await asyncio.wait_for(call_next(request), timeout=45.0)
+        except asyncio.TimeoutError:
+            return JSONResponse({"error": "REQUEST_TIMEOUT"}, status_code=504)
+    
+    # Request size limit middleware
+    @app.middleware("http")
+    async def limit_content_length(request: Request, call_next: Callable) -> Response:
+        """Limit max request payload size to 10MB."""
+        content_length = request.headers.get("content-length")
+        if content_length and int(content_length) > 10_000_000:
+            return JSONResponse(status_code=413, content={"detail": "Payload too large"})
+        return await call_next(request)
     
     # Security headers middleware
     @app.middleware("http")
@@ -241,11 +265,21 @@ All endpoints require a valid Atlassian JWT token in the Authorization header.
     @app.get("/health", tags=["health"])
     async def health_check():
         """
-        Health check endpoint for load balancers.
+        Lightweight health check for load balancers.
         """
-        vector_store = get_vector_store()
-        cache = get_cache_service()
-        llm = get_llm_service()
+        return {
+            "status": "healthy",
+            "version": "1.0.0"
+        }
+        
+    @app.get("/health/deep", tags=["health"])
+    async def deep_health_check(request: Request):
+        """
+        Deep health check checking dependencies.
+        """
+        vector_store = request.app.state.vector_store
+        cache = request.app.state.cache_service
+        llm = request.app.state.llm_service
         
         return {
             "status": "healthy",
@@ -279,7 +313,7 @@ All endpoints require a valid Atlassian JWT token in the Authorization header.
             raise HTTPException(status_code=401, detail=e.message)
         
         # Get current month usage
-        billing = get_billing_service()
+        billing = request.app.state.billing_service
         today = date.today()
         
         try:

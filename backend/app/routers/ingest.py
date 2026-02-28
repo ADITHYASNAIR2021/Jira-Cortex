@@ -65,7 +65,8 @@ async def ingest_batch(
     background_tasks: BackgroundTasks,
     user: UserContext = Depends(get_current_user),
     processor: BackgroundProcessor = Depends(get_background_processor),
-    billing_service: BillingService = Depends(get_billing_service)
+    billing_service: BillingService = Depends(get_billing_service),
+    cache_service: CacheService = Depends(get_cache_service)
 ) -> IngestResponse:
     """
     Accept batch of issues for async processing.
@@ -150,6 +151,9 @@ async def ingest_batch(
         issue_count=len(ingest_request.issues)
     )
     
+    # Invalidate cache
+    await cache_service.invalidate_tenant(user.tenant_id)
+    
     return IngestResponse(
         job_id=job.job_id,
         status="accepted",
@@ -170,7 +174,8 @@ async def ingest_confluence_batch(
     background_tasks: BackgroundTasks,
     user: UserContext = Depends(get_current_user),
     processor: BackgroundProcessor = Depends(get_background_processor),
-    billing_service: BillingService = Depends(get_billing_service)
+    billing_service: BillingService = Depends(get_billing_service),
+    cache_service: CacheService = Depends(get_cache_service)
 ) -> IngestResponse:
     settings = get_settings()
     
@@ -195,6 +200,9 @@ async def ingest_confluence_batch(
         pages=ingest_request.pages,
         tenant_id=ingest_request.tenant_id
     )
+    
+    # Invalidate cache
+    await cache_service.invalidate_tenant(user.tenant_id)
     
     return IngestResponse(
         job_id=job.job_id,
@@ -291,11 +299,12 @@ async def ingest_single(
                     cached=False
                 )
             
-            # Invalidate cache for this issue
+            # Invalidate cache for this issue and tenant
             await cache_service.invalidate_issue(
                 tenant_id=ingest_request.tenant_id,
                 issue_key=ingest_request.issue.key
             )
+            await cache_service.invalidate_tenant(ingest_request.tenant_id)
             
             logger.info(
                 "single_issue_ingested",

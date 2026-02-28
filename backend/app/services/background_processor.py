@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from enum import Enum
 import structlog
 from functools import lru_cache
+from fastapi import Request
 
 from app.config import get_settings
 from app.models.schemas import JiraIssue, ConfluencePage
@@ -80,11 +81,16 @@ class BackgroundProcessor:
     # Job TTL in Redis (24 hours)
     JOB_TTL_SECONDS = 86400
     
-    def __init__(self):
+    def __init__(self, vector_store, llm_service, billing_service, cache_service=None):
         self.settings = get_settings()
         self._jobs: Dict[str, IngestionJob] = {}
         self._processing_lock = asyncio.Lock()
         self._redis_client = None
+        
+        self.vector_store = vector_store
+        self.llm_service = llm_service
+        self.billing_service = billing_service
+        self.cache_service = cache_service
     
     async def _get_redis(self):
         """Get or create Redis client."""
@@ -271,9 +277,9 @@ class BackgroundProcessor:
         job.status = JobStatus.PROCESSING
         
         text_processor = get_text_processor()
-        llm_service = get_llm_service()
-        vector_store = get_vector_store()
-        billing_service = get_billing_service()
+        llm_service = self.llm_service
+        vector_store = self.vector_store
+        billing_service = self.billing_service
         
         total_tokens_used = 0
         
@@ -502,9 +508,9 @@ class BackgroundProcessor:
         job.status = JobStatus.PROCESSING
         
         text_processor = get_text_processor()
-        llm_service = get_llm_service()
-        vector_store = get_vector_store()
-        billing_service = get_billing_service()
+        llm_service = self.llm_service
+        vector_store = self.vector_store
+        billing_service = self.billing_service
         
         total_tokens_used = 0
         
@@ -595,8 +601,8 @@ class BackgroundProcessor:
             Tuple of (success, tokens_used)
         """
         text_processor = get_text_processor()
-        llm_service = get_llm_service()
-        vector_store = get_vector_store()
+        llm_service = self.llm_service
+        vector_store = self.vector_store
         
         try:
             if event_type == "deleted":
@@ -649,7 +655,6 @@ class BackgroundProcessor:
         return len(to_remove)
 
 
-@lru_cache(maxsize=1)
-def get_background_processor() -> BackgroundProcessor:
-    """Get or create background processor singleton."""
-    return BackgroundProcessor()
+def get_background_processor(request: Request) -> BackgroundProcessor:
+    """Get background processor instance from app state."""
+    return request.app.state.background_processor

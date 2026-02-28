@@ -9,6 +9,8 @@ from dataclasses import dataclass
 import structlog
 from openai import AsyncOpenAI, OpenAIError
 from functools import lru_cache
+from fastapi import Request
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from app.config import get_settings
 from app.services.vector_store import SearchResult
@@ -104,6 +106,11 @@ When providing a solution:
         result = await self.generate_embedding_with_usage(text)
         return result[0]
     
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type(OpenAIError)
+    )
     async def generate_embedding_with_usage(self, text: str) -> Tuple[List[float], int]:
         """
         Generate embedding vector for text with usage tracking.
@@ -155,6 +162,11 @@ When providing a solution:
         embeddings, _ = await self.generate_embeddings_batch_with_usage(texts)
         return embeddings
     
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type(OpenAIError)
+    )
     async def generate_embeddings_batch_with_usage(
         self, 
         texts: List[str]
@@ -202,6 +214,11 @@ When providing a solution:
             logger.error("batch_embedding_failed", error=str(e))
             raise LLMServiceError(f"Batch embedding failed: {e}")
     
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type(OpenAIError)
+    )
     async def generate_answer(
         self,
         query: str,
@@ -353,7 +370,6 @@ ANSWER: [your answer with citations]"""
             return False
 
 
-@lru_cache(maxsize=1)
-def get_llm_service() -> LLMService:
-    """Get or create LLM service singleton."""
-    return LLMService()
+def get_llm_service(request: Request) -> LLMService:
+    """Get LLM service instance from app state."""
+    return request.app.state.llm_service

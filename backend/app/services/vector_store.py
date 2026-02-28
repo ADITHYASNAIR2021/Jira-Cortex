@@ -8,8 +8,9 @@ import uuid
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
 import structlog
-from functools import lru_cache
+from fastapi import Request
 from qdrant_client import AsyncQdrantClient, models
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.config import get_settings
 from app.utils.text_processing import TextChunk
@@ -217,6 +218,7 @@ class VectorStore:
             logger.error("upsert_failed", issue_key=issue_key, error=str(e))
             raise VectorStoreError(f"Failed to upsert chunks: {e}")
     
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
     async def search(
         self,
         query_embedding: List[float],
@@ -375,7 +377,6 @@ class VectorStore:
             return False
 
 
-@lru_cache(maxsize=1)
-def get_vector_store() -> VectorStore:
-    """Get or create vector store singleton."""
-    return VectorStore()
+def get_vector_store(request: Request) -> VectorStore:
+    """Get vector store from app state."""
+    return request.app.state.vector_store

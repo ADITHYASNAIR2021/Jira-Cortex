@@ -19,10 +19,7 @@ logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/api/v1/billing", tags=["billing"])
 
-# Initialize Stripe
-settings = get_settings()
-if settings.stripe_secret_key:
-    stripe.api_key = settings.stripe_secret_key
+# Remove global stripe initialization
 
 
 # -----------------------------------------
@@ -89,6 +86,8 @@ async def create_checkout_session(
             detail="Stripe is not configured. Contact support."
         )
     
+    stripe.api_key = settings.stripe_secret_key
+    
     try:
         if request_body.product_type == "subscription":
             # Platform Fee ($299/mo subscription)
@@ -150,7 +149,8 @@ async def create_checkout_session(
 @router.post("/webhook")
 async def stripe_webhook(
     request: Request,
-    billing_service: BillingService = Depends(get_billing_service)
+    billing_service: BillingService = Depends(get_billing_service),
+    cache_service: CacheService = Depends(get_cache_service)
 ):
     """
     Stripe webhook endpoint.
@@ -160,8 +160,10 @@ async def stripe_webhook(
     - invoice.paid: Subscription renewal
     - customer.subscription.deleted: Subscription cancelled
     """
-    if not settings.stripe_webhook_secret:
+    if not settings.stripe_webhook_secret or not settings.stripe_secret_key:
         raise HTTPException(status_code=503, detail="Webhook not configured")
+        
+    stripe.api_key = settings.stripe_secret_key
     
     payload = await request.body()
     sig_header = request.headers.get('stripe-signature')

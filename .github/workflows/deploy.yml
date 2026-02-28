@@ -12,7 +12,10 @@ on:
         default: "staging"
         type: choice
         options:
+          - integrate
           - staging
+          - demo
+          - preprod
           - production
 
 env:

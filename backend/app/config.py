@@ -7,7 +7,7 @@ All secrets loaded from environment variables only.
 
 from functools import lru_cache
 from typing import List, Optional
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     # -----------------------------------------
     redis_url: str = Field(default="redis://localhost:6379/0")
     redis_password: Optional[str] = Field(default=None)
-    redis_cache_ttl_seconds: int = Field(default=10, ge=1, le=3600)
+    redis_cache_ttl_seconds: int = Field(default=300, ge=1, le=3600)
     
     # -----------------------------------------
     # Atlassian Configuration
@@ -100,7 +100,7 @@ class Settings(BaseSettings):
     @field_validator("app_env")
     @classmethod
     def validate_env(cls, v: str) -> str:
-        allowed = {"development", "staging", "production"}
+        allowed = {"development", "staging", "integrate", "demo", "preprod", "production"}
         if v.lower() not in allowed:
             raise ValueError(f"app_env must be one of {allowed}")
         return v.lower()
@@ -112,6 +112,12 @@ class Settings(BaseSettings):
         if v.upper() not in allowed:
             raise ValueError(f"log_level must be one of {allowed}")
         return v.upper()
+    
+    @model_validator(mode='after')
+    def check_allowed_tenants(self):
+        if self.app_env == "production" and not self.allowed_tenants:
+            raise ValueError("ALLOWED_TENANTS must be set in production")
+        return self
     
     @property
     def cors_origins_list(self) -> List[str]:

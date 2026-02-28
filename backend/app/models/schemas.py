@@ -7,7 +7,7 @@ Type-safe request/response models with validation.
 from datetime import datetime, timezone
 from enum import Enum
 from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, field_validator
 import re
 
 def utc_now():
@@ -112,6 +112,11 @@ class JiraIssue(BaseModel):
     labels: List[str] = Field(default_factory=list)
     components: List[str] = Field(default_factory=list)
     comments: List[str] = Field(default_factory=list, max_length=100)
+    
+    @field_validator("comments")
+    @classmethod
+    def validate_comment_sizes(cls, v):
+        return [c[:10000] for c in v]  # Cap each comment at 10k chars
 
 
 class IngestBatchRequest(BaseModel):

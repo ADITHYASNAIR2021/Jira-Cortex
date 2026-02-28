@@ -281,6 +281,25 @@ class CacheService:
             logger.warning("add_history_failed", error=str(e))
             return False
             
+    async def is_event_processed(self, event_id: str) -> bool:
+        """Check if a Stripe webhook event was already processed."""
+        try:
+            client = await self.get_client()
+            key = f"stripe_event:{event_id}"
+            return await client.exists(key) > 0
+        except Exception as e:
+            logger.warning("idempotency_check_failed", error=str(e))
+            return False
+
+    async def mark_event_processed(self, event_id: str) -> None:
+        """Mark a Stripe webhook event as processed."""
+        try:
+            client = await self.get_client()
+            key = f"stripe_event:{event_id}"
+            await client.setex(key, 86400 * 7, "1")  # Keep for 7 days
+        except Exception as e:
+            logger.warning("idempotency_mark_failed", error=str(e))
+            
     async def health_check(self) -> bool:
         """Check if Redis is healthy."""
         try:
@@ -297,7 +316,6 @@ class CacheService:
             self._client = None
 
 
-@lru_cache(maxsize=1)
-def get_cache_service() -> CacheService:
-    """Get or create cache service singleton."""
-    return CacheService()
+def get_cache_service(request: Request) -> CacheService:
+    """Get cache service instance from app state."""
+    return request.app.state.cache_service

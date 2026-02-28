@@ -13,6 +13,7 @@ from sqlalchemy import (
     Index, func
 )
 
+from fastapi import Request
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy.future import select
@@ -109,8 +110,10 @@ class BillingService:
             self._engine = create_async_engine(
                 db_url,
                 echo=self.settings.app_debug,
-                pool_size=5,
-                max_overflow=10
+                pool_size=20,
+                max_overflow=30,
+                pool_recycle=1800,
+                pool_pre_ping=True
             )
             
             self._session_factory = sessionmaker(
@@ -420,7 +423,7 @@ class BillingService:
             # Atomic update for race condition prevention
             result = await session.execute(
                 text("""
-                    UPDATE wallets 
+                    UPDATE tenant_wallets 
                     SET balance = balance - :cost,
                         updated_at = :now
                     WHERE tenant_id = :tenant_id AND balance >= :cost
@@ -528,7 +531,7 @@ class BillingService:
             
             wallet.is_active = True
             wallet.subscription_id = subscription_id
-            wallet.subscription_end = datetime.utcnow() + timedelta(days=30)
+            wallet.subscription_end = utc_now() + timedelta(days=30)
             
             logger.info("subscription_activated", tenant_id=tenant_id)
             return True
@@ -606,7 +609,6 @@ class BillingService:
             await self._engine.dispose()
 
 
-@lru_cache(maxsize=1)
-def get_billing_service() -> BillingService:
-    """Get or create billing service singleton."""
-    return BillingService()
+def get_billing_service(request: Request) -> BillingService:
+    """Get billing service instance from app state."""
+    return request.app.state.billing_service
