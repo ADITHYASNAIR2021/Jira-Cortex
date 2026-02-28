@@ -50,7 +50,7 @@ jobs:
 
       - name: Run tests
         env:
-          OPENAI_API_KEY: "sk-test-key"
+          OPENAI_API_KEY: "sk-test-key-minimum-20-chars"
           QDRANT_URL: "http://localhost:6333"
           REDIS_URL: "redis://localhost:6379/0"
           ATLASSIAN_CLIENT_ID: "test-client-id"
