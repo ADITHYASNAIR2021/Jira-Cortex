@@ -4,7 +4,7 @@ Jira Cortex - LLM Service
 OpenAI integration with strict hallucination prevention and usage tracking.
 """
 
-from typing import List, Optional, Tuple, Dict, Any
+from typing import List, Optional, Tuple
 from dataclasses import dataclass
 import structlog
 from openai import AsyncOpenAI, OpenAIError

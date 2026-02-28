@@ -6,7 +6,6 @@ RAG query endpoint with ACL filtering, caching, billing, and rate limiting.
 
 import time
 import uuid
-from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
 from slowapi import Limiter
 from slowapi.util import get_remote_address

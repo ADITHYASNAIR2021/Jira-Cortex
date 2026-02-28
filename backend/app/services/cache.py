@@ -6,8 +6,7 @@ Redis-based semantic caching with TTL.
 
 import json
 import hashlib
-from typing import Optional, Any
-from datetime import timedelta
+from typing import Optional
 import structlog
 import redis.asyncio as redis
 

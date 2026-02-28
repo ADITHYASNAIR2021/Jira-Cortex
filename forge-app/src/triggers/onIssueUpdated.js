@@ -112,7 +112,7 @@ function mapStatus(statusName) {
  * This signals to Jira that the webhook should be retried.
  */
 export async function onIssueChange(event, context) {
-    const { issue, changelog } = event;
+    const { issue } = event;
     const cloudId = context.cloudId;
 
     console.log(`Issue change event: ${issue.key}`, {

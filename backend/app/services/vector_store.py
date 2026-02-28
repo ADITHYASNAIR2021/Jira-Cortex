@@ -9,7 +9,6 @@ from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
 import structlog
 from qdrant_client import QdrantClient, models
-from qdrant_client.http.exceptions import UnexpectedResponse
 
 from app.config import get_settings
 from app.utils.text_processing import TextChunk
@@ -310,7 +309,7 @@ class VectorStore:
         """
         try:
             # Delete by filter
-            result = self.client.delete(
+            self.client.delete(
                 collection_name=self.settings.qdrant_collection_name,
                 points_selector=models.FilterSelector(
                     filter=models.Filter(

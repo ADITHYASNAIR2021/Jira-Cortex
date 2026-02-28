@@ -6,7 +6,7 @@
 
 import Resolver from '@forge/resolver';
 import { storage, getContext } from '@forge/api';
-import { ingestBatch, getUsageStats, setBackendUrl } from '../api/backend';
+import { ingestBatch, getUsageStats, setBackendUrl, getJobStatus } from '../api/backend';
 
 const resolver = new Resolver();
 
@@ -57,7 +57,7 @@ resolver.define('ingestBatch', async (req) => {
 /**
  * Get usage stats resolver
  */
-resolver.define('getUsageStats', async (req) => {
+resolver.define('getUsageStats', async () => {
     try {
         const stats = await getUsageStats();
         return stats;
@@ -104,8 +104,7 @@ resolver.define('getJobStatus', async (req) => {
     }
 
     try {
-        const { getJobStatus: fetchJobStatus } = await import('../api/backend');
-        const status = await fetchJobStatus(jobId);
+        const status = await getJobStatus(jobId);
         return status;
     } catch (err) {
         console.warn('Job status error:', err);
