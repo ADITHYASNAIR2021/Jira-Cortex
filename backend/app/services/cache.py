@@ -34,6 +34,7 @@ class CacheService:
     # Key prefixes for namespacing
     PREFIX_QUERY = "cortex:query:"
     PREFIX_EMBEDDING = "cortex:embed:"
+    PREFIX_SESSION = "cortex:session:"
     
     def __init__(self):
         self.settings = get_settings()
@@ -55,21 +56,26 @@ class CacheService:
         self, 
         query: str, 
         tenant_id: str, 
-        project_access: list
+        project_access: list,
+        session_id: Optional[str] = None
     ) -> str:
         """
-        Generate a unique cache key that includes ACL context.
+        Generate a unique cache key that includes ACL context and optional session.
         
         SECURITY: Keys include project access to prevent cache poisoning
         """
         # Sort project access for deterministic hashing
         sorted_projects = sorted(project_access)
         
-        key_content = json.dumps({
+        key_data = {
             "q": query.lower().strip(),
             "t": tenant_id,
             "p": sorted_projects
-        }, sort_keys=True)
+        }
+        if session_id:
+            key_data["s"] = session_id
+            
+        key_content = json.dumps(key_data, sort_keys=True)
         
         # Hash for fixed-length key
         key_hash = hashlib.sha256(key_content.encode()).hexdigest()[:32]
@@ -80,7 +86,8 @@ class CacheService:
         self,
         query: str,
         tenant_id: str,
-        project_access: list
+        project_access: list,
+        session_id: Optional[str] = None
     ) -> Optional[QueryResponse]:
         """
         Get cached query response if exists.
@@ -89,13 +96,14 @@ class CacheService:
             query: User's query
             tenant_id: Tenant ID
             project_access: User's project access list
+            session_id: Optional Session ID
             
         Returns:
             Cached QueryResponse or None
         """
         try:
             client = await self.get_client()
-            key = self._generate_cache_key(query, tenant_id, project_access)
+            key = self._generate_cache_key(query, tenant_id, project_access, session_id)
             
             cached = await client.get(key)
             
@@ -123,7 +131,8 @@ class CacheService:
         query: str,
         tenant_id: str,
         project_access: list,
-        response: QueryResponse
+        response: QueryResponse,
+        session_id: Optional[str] = None
     ) -> bool:
         """
         Cache a query response.
@@ -133,13 +142,14 @@ class CacheService:
             tenant_id: Tenant ID
             project_access: User's project access list
             response: Response to cache
+            session_id: Optional Session ID
             
         Returns:
             True if cached successfully
         """
         try:
             client = await self.get_client()
-            key = self._generate_cache_key(query, tenant_id, project_access)
+            key = self._generate_cache_key(query, tenant_id, project_access, session_id)
             
             # Serialize response (exclude cached flag)
             data = response.model_dump(exclude={"cached"})
@@ -242,7 +252,34 @@ class CacheService:
         except (redis.RedisError, json.JSONDecodeError) as e:
             logger.warning("embedding_cache_get_failed", error=str(e))
             return None
-    
+            
+    async def get_conversation_history(self, session_id: str, tenant_id: str) -> list:
+        """Get the last N messages of a conversation session."""
+        try:
+            client = await self.get_client()
+            key = f"{self.PREFIX_SESSION}{tenant_id}:{session_id}"
+            history = await client.lrange(key, 0, -1)
+            return [json.loads(msg) for msg in history] if history else []
+        except Exception as e:
+            logger.warning("get_history_failed", error=str(e))
+            return []
+
+    async def add_to_conversation_history(
+        self, session_id: str, tenant_id: str, role: str, content: str, max_messages: int = 10
+    ) -> bool:
+        """Append a message to a conversation session history."""
+        try:
+            client = await self.get_client()
+            key = f"{self.PREFIX_SESSION}{tenant_id}:{session_id}"
+            msg = json.dumps({"role": role, "content": content})
+            await client.rpush(key, msg)
+            await client.ltrim(key, -max_messages, -1)
+            await client.expire(key, 1800)  # 30 min expiration
+            return True
+        except Exception as e:
+            logger.warning("add_history_failed", error=str(e))
+            return False
+            
     async def health_check(self) -> bool:
         """Check if Redis is healthy."""
         try:
@@ -259,13 +296,9 @@ class CacheService:
             self._client = None
 
 
-# Singleton instance
-_cache_service: Optional[CacheService] = None
+from functools import lru_cache
 
-
+@lru_cache(maxsize=1)
 def get_cache_service() -> CacheService:
     """Get or create cache service singleton."""
-    global _cache_service
-    if _cache_service is None:
-        _cache_service = CacheService()
-    return _cache_service
+    return CacheService()

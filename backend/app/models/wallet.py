@@ -7,7 +7,10 @@ Part of the "Financial Fortress" architecture.
 
 from sqlalchemy import Column, String, Float, Boolean, DateTime, Integer, ForeignKey
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import datetime, timezone
+
+def utc_now():
+    return datetime.now(timezone.utc)
 
 from app.services.billing import Base
 
@@ -36,8 +39,8 @@ class TenantWallet(Base):
     auto_recharge_threshold = Column(Float, default=10.0)  # Trigger when below this
     
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
     
     # Relationship to transactions
     transactions = relationship("PaymentTransaction", back_populates="wallet")
@@ -72,7 +75,7 @@ class PaymentTransaction(Base):
     balance_before = Column(Float, nullable=True)
     balance_after = Column(Float, nullable=True)
     
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
     
     # Relationship
     wallet = relationship("TenantWallet", back_populates="transactions")
@@ -99,7 +102,7 @@ class UsageCost(Base):
     # Metadata
     description = Column(String(500), nullable=True)
     is_active = Column(Boolean, default=True)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
     
     def __repr__(self):
         return f"<UsageCost {self.operation}: ${self.cost_per_1k_tokens}/1k tokens>"

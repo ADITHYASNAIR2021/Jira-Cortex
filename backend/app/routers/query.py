@@ -133,7 +133,8 @@ async def query(
         cached_response = await cache_service.get_cached_response(
             query=query_request.query,
             tenant_id=user.tenant_id,
-            project_access=user.project_access
+            project_access=user.project_access,
+            session_id=query_request.session_id
         )
         
         if cached_response:
@@ -180,11 +181,35 @@ async def query(
             # Include current issue context if provided
             additional_context = str(query_request.context)
         
+        # Extra Step: Grab Conversation History
+        conversation_history = None
+        if query_request.session_id:
+            conversation_history = await cache_service.get_conversation_history(
+                session_id=query_request.session_id,
+                tenant_id=user.tenant_id
+            )
+        
         llm_response = await llm_service.generate_answer(
             query=query_request.query,
             search_results=search_results,
-            additional_context=additional_context
+            additional_context=additional_context,
+            conversation_history=conversation_history
         )
+        
+        # Save conversation history to memory
+        if query_request.session_id:
+            await cache_service.add_to_conversation_history(
+                session_id=query_request.session_id,
+                tenant_id=user.tenant_id,
+                role="user",
+                content=query_request.query
+            )
+            await cache_service.add_to_conversation_history(
+                session_id=query_request.session_id,
+                tenant_id=user.tenant_id,
+                role="assistant",
+                content=llm_response.answer
+            )
         
         # Build citations
         citations = []
@@ -238,7 +263,8 @@ async def query(
             query=query_request.query,
             tenant_id=user.tenant_id,
             project_access=user.project_access,
-            response=response
+            response=response,
+            session_id=query_request.session_id
         )
         
         logger.info(

@@ -8,7 +8,7 @@ import uuid
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
 import structlog
-from qdrant_client import QdrantClient, models
+from qdrant_client import AsyncQdrantClient, models
 
 from app.config import get_settings
 from app.utils.text_processing import TextChunk
@@ -49,21 +49,20 @@ class VectorStore:
     
     def __init__(self):
         self.settings = get_settings()
-        self._client: Optional[QdrantClient] = None
+        self._client: Optional[AsyncQdrantClient] = None
         
-    @property
-    def client(self) -> QdrantClient:
-        """Lazy initialization of Qdrant client."""
+    async def get_client(self) -> AsyncQdrantClient:
+        """Lazy initialization of AsyncQdrantClient."""
         if self._client is None:
             if self.settings.qdrant_api_key:
-                self._client = QdrantClient(
+                self._client = AsyncQdrantClient(
                     url=self.settings.qdrant_url,
                     api_key=self.settings.qdrant_api_key,
                     timeout=30
                 )
             else:
                 # Local Qdrant (development)
-                self._client = QdrantClient(
+                self._client = AsyncQdrantClient(
                     url=self.settings.qdrant_url,
                     timeout=30
                 )
@@ -309,7 +308,8 @@ class VectorStore:
         """
         try:
             # Delete by filter
-            self.client.delete(
+            client = await self.get_client()
+            await client.delete(
                 collection_name=self.settings.qdrant_collection_name,
                 points_selector=models.FilterSelector(
                     filter=models.Filter(
@@ -340,7 +340,8 @@ class VectorStore:
         Delete all chunks for a tenant due to app uninstallation.
         """
         try:
-            self.client.delete(
+            client = await self.get_client()
+            await client.delete(
                 collection_name=self.settings.qdrant_collection_name,
                 points_selector=models.FilterSelector(
                     filter=models.Filter(
@@ -363,19 +364,16 @@ class VectorStore:
     async def health_check(self) -> bool:
         """Check if vector store is healthy."""
         try:
-            self.client.get_collections()
+            client = await self.get_client()
+            await client.get_collections()
             return True
         except Exception:
             return False
 
 
-# Singleton instance
-_vector_store: Optional[VectorStore] = None
+from functools import lru_cache
 
-
+@lru_cache(maxsize=1)
 def get_vector_store() -> VectorStore:
     """Get or create vector store singleton."""
-    global _vector_store
-    if _vector_store is None:
-        _vector_store = VectorStore()
-    return _vector_store
+    return VectorStore()

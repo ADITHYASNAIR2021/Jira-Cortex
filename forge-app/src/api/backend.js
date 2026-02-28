@@ -131,12 +131,13 @@ async function apiRequest(endpoint, options = {}, retries = 3) {
  * @param {Object} context - Optional current issue context
  * @returns {Promise<Object>} Query response with answer and citations
  */
-export async function queryKnowledgeBase(query, context = null) {
+export async function queryKnowledgeBase(query, context = null, sessionId = null) {
     return apiRequest('/api/v1/query', {
         method: 'POST',
         body: JSON.stringify({
             query,
-            context
+            context,
+            session_id: sessionId
         })
     });
 }
@@ -230,6 +231,21 @@ export async function setBackendUrl(url) {
 export async function uninstallApp(tenantId) {
     return apiRequest('/api/v1/tenant/provision', {
         method: 'DELETE',
+        body: JSON.stringify({
+            tenant_id: tenantId
+        })
+    });
+}
+
+/**
+ * Handle app installation / provision tenant data
+ *
+ * @param {string} tenantId - Tenant identifier
+ * @returns {Promise<Object>} Status response
+ */
+export async function provisionTenant(tenantId) {
+    return apiRequest('/api/v1/tenant/provision', {
+        method: 'POST',
         body: JSON.stringify({
             tenant_id: tenantId
         })

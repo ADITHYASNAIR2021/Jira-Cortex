@@ -5,7 +5,7 @@ Persistent usage tracking with SQLAlchemy.
 Saves token consumption to PostgreSQL for billing.
 """
 
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from typing import Optional
 from contextlib import asynccontextmanager
 import structlog
@@ -13,6 +13,9 @@ from sqlalchemy import (
     Column, String, Integer, DateTime, Boolean, Date, 
     Index, func
 )
+
+def utc_now():
+    return datetime.now(timezone.utc)
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy.future import select
@@ -35,7 +38,7 @@ class UsageRecord(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     tenant_id = Column(String(255), nullable=False, index=True)
     user_account_id = Column(String(255), nullable=False)
-    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
+    timestamp = Column(DateTime, default=utc_now, nullable=False)
     date = Column(Date, default=date.today, nullable=False, index=True)
     operation = Column(String(50), nullable=False)  # 'query' or 'ingest'
     input_tokens = Column(Integer, default=0, nullable=False)
@@ -64,7 +67,7 @@ class MonthlyUsageSummary(Base):
     total_ingestions = Column(Integer, default=0, nullable=False)
     total_tokens = Column(Integer, default=0, nullable=False)
     total_cached_queries = Column(Integer, default=0, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
     
     __table_args__ = (
         Index('ix_monthly_tenant_period', 'tenant_id', 'year', 'month', unique=True),
@@ -411,12 +414,29 @@ class BillingService:
             if session is None:
                 return False
             
-            wallet = await session.get(TenantWallet, tenant_id)
-            if not wallet:
-                return False
+            from sqlalchemy import text
             
-            balance_before = wallet.balance
-            wallet.balance -= cost
+            # Atomic update for race condition prevention
+            result = await session.execute(
+                text("""
+                    UPDATE wallets 
+                    SET balance = balance - :cost,
+                        updated_at = :now
+                    WHERE tenant_id = :tenant_id AND balance >= :cost
+                    RETURNING balance
+                """),
+                {
+                    "cost": cost,
+                    "tenant_id": tenant_id,
+                    "now": utc_now()
+                }
+            )
+            
+            row = result.fetchone()
+            if not row:
+                return False
+                
+            new_balance = float(row[0])
             
             # Record transaction
             transaction = PaymentTransaction(
@@ -426,12 +446,12 @@ class BillingService:
                 type="usage_deduction",
                 description=description or "AI processing usage",
                 status="succeeded",
-                balance_before=balance_before,
-                balance_after=wallet.balance
+                balance_before=new_balance + cost,
+                balance_after=new_balance
             )
             
-            session.add(wallet)
             session.add(transaction)
+            await session.commit()
             
             logger.info(
                 "balance_deducted",
@@ -546,7 +566,7 @@ class BillingService:
             wallet = result.scalar_one_or_none()
             
             if wallet:
-                wallet.subscription_end = datetime.utcnow() + timedelta(days=30)
+                wallet.subscription_end = utc_now() + timedelta(days=30)
                 return True
             return False
     
@@ -585,13 +605,9 @@ class BillingService:
             await self._engine.dispose()
 
 
-# Singleton instance
-_billing_service: Optional[BillingService] = None
+from functools import lru_cache
 
-
+@lru_cache(maxsize=1)
 def get_billing_service() -> BillingService:
     """Get or create billing service singleton."""
-    global _billing_service
-    if _billing_service is None:
-        _billing_service = BillingService()
-    return _billing_service
+    return BillingService()

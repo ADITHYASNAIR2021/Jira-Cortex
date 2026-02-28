@@ -44,12 +44,16 @@ class SecretDetector:
     - And many more secret patterns
     """
     
-    # Additional patterns for secrets that detect-secrets might miss
+    # Additional patterns for secrets that detect-secrets might miss or not expose the secret_value for
     ADDITIONAL_PATTERNS = [
         # Jira/Atlassian API tokens
         (r'ATATT3x[A-Za-z0-9-_]{50,}', '[ATLASSIAN_TOKEN_REDACTED]'),
+        # GitHub tokens
+        (r'ghp_[a-zA-Z0-9]{36}', '[GITHUB_TOKEN_REDACTED]'),
+        # AWS Access Key IDs
+        (r'(?<![A-Z0-9])[A-Z0-9]{20}(?![A-Z0-9])', '[AWS_KEY_REDACTED]'),
         # Generic high-entropy strings that look like secrets
-        (r'(?:api[_-]?key|apikey|secret|password|token|auth)["\']?\s*[:=]\s*["\']?([A-Za-z0-9+/]{20,})', '[SECRET_REDACTED]'),
+        (r'(?:api[_-]?key|apikey|secret|password|token|auth)["\']?\s*[:=]\s*["\']?([A-Za-z0-9+/_]{20,})', r'\g<0>_MASKED'),
         # JWT tokens in text
         (r'eyJ[A-Za-z0-9-_]+\.eyJ[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+', '[JWT_REDACTED]'),
     ]
@@ -113,10 +117,15 @@ class SecretDetector:
             
             # Apply additional patterns
             for pattern, replacement in self.ADDITIONAL_PATTERNS:
-                matches = re.findall(pattern, sanitized, re.IGNORECASE)
-                if matches:
-                    secrets_found += len(matches)
-                    sanitized = re.sub(pattern, replacement, sanitized, flags=re.IGNORECASE)
+                matches = re.finditer(pattern, sanitized, flags=re.IGNORECASE)
+                match_count = sum(1 for _ in matches)
+                if match_count > 0:
+                    secrets_found += match_count
+                    if "MASKED" in replacement:
+                        # For the generic pattern, just replace with the redacted string
+                        sanitized = re.sub(pattern, '[SECRET_REDACTED]', sanitized, flags=re.IGNORECASE)
+                    else:
+                        sanitized = re.sub(pattern, replacement, sanitized, flags=re.IGNORECASE)
             
             if secrets_found > 0:
                 logger.warning("secrets_detected_and_masked", count=secrets_found)
@@ -369,6 +378,33 @@ class TextProcessor:
                 clean_comment = self.html_cleaner.clean(comment)
                 parts.append(f"Comment {i}: {clean_comment}")
         
+        return "\n\n".join(parts)
+
+    def format_confluence_page_for_embedding(
+        self,
+        page_id: str,
+        title: str,
+        body: Optional[str],
+        space_key: str,
+        labels: List[str] = None
+    ) -> str:
+        """
+        Format a Confluence page into text for embedding.
+        """
+        parts = [
+            f"Type: Confluence Page",
+            f"Space: {space_key}",
+            f"Page ID: {page_id}",
+            f"Title: {title}",
+        ]
+        
+        if labels:
+            parts.append(f"Labels: {', '.join(labels)}")
+            
+        if body:
+            clean_body = self.html_cleaner.clean(body)
+            parts.append(f"Content: {clean_body}")
+            
         return "\n\n".join(parts)
 
 

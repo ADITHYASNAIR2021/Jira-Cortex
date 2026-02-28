@@ -5,8 +5,8 @@
  * "Solve This" button for finding similar resolved issues.
  */
 
-import React, { useState, useEffect } from 'react';
-import ForgeReconciler, {
+import { useState, useEffect } from 'react';
+import {
     Button,
     Text,
     Box,
@@ -32,11 +32,6 @@ const resultCardStyles = xcss({
     marginTop: 'space.100',
 });
 
-const confidenceStyles = (score) => xcss({
-    color: score >= 70 ? 'color.text.success' : score >= 50 ? 'color.text.warning' : 'color.text.danger',
-    fontWeight: 'bold',
-});
-
 const citationStyles = xcss({
     marginTop: 'space.100',
     padding: 'space.100',
@@ -49,6 +44,7 @@ export function ContextPanel() {
     const [result, setResult] = useState(null);
     const [error, setError] = useState(null);
     const [issueContext, setIssueContext] = useState(null);
+    const [sessionId] = useState(() => Date.now().toString() + Math.random().toString(36).substring(2));
 
     // Get current issue context on mount
     useEffect(() => {
@@ -87,7 +83,8 @@ export function ContextPanel() {
                 context: {
                     currentIssueKey: issueContext.issueKey,
                     currentIssueSummary: issueContext.issueSummary,
-                }
+                },
+                sessionId: sessionId
             });
 
             setResult(response);
@@ -196,7 +193,7 @@ export function ContextPanel() {
                 {!result && !loading && !error && (
                     <SectionMessage appearance="information">
                         <Text>
-                            Click "Solve This" to find similar resolved issues and solutions.
+                            Click &quot;Solve This&quot; to find similar resolved issues and solutions.
                         </Text>
                     </SectionMessage>
                 )}

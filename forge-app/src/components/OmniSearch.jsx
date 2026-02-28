@@ -5,8 +5,8 @@
  * ChatGPT-style conversational UI.
  */
 
-import React, { useState, useRef, useEffect } from 'react';
-import ForgeReconciler, {
+import { useState, useRef, useEffect } from 'react';
+import {
     Button,
     Text,
     Textfield,
@@ -68,6 +68,7 @@ export function OmniSearch() {
     const [messages, setMessages] = useState([]);
     const [inputValue, setInputValue] = useState('');
     const [loading, setLoading] = useState(false);
+    const [sessionId] = useState(() => Date.now().toString() + Math.random().toString(36).substring(2));
     const chatEndRef = useRef(null);
 
     // Auto-scroll to bottom of chat
@@ -96,7 +97,8 @@ export function OmniSearch() {
             // Call resolver to query backend
             const response = await invoke('queryResolver', {
                 query: userMessage.content,
-                context: null
+                context: null,
+                sessionId: sessionId
             });
 
             const assistantMessage = {
@@ -229,13 +231,13 @@ export function OmniSearch() {
                                 <Text weight="medium">Welcome to Cortex Search!</Text>
                                 <Text>Try asking questions like:</Text>
                                 <Text size="small" color="color.text.subtlest">
-                                    • "Has this login bug happened before?"
+                                    • &quot;Has this login bug happened before?&quot;
                                 </Text>
                                 <Text size="small" color="color.text.subtlest">
-                                    • "What is the status of the Mobile App release?"
+                                    • &quot;What is the status of the Mobile App release?&quot;
                                 </Text>
                                 <Text size="small" color="color.text.subtlest">
-                                    • "How did we fix the Redis timeout issue?"
+                                    • &quot;How did we fix the Redis timeout issue?&quot;
                                 </Text>
                             </Stack>
                         </SectionMessage>

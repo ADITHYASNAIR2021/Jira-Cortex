@@ -40,27 +40,30 @@ class TestBackgroundProcessor:
             comments=[]
         )
     
-    def test_create_job_returns_pending_status(self, processor):
+    @pytest.mark.asyncio
+    async def test_create_job_returns_pending_status(self, processor):
         """New job should have pending status."""
-        job = processor.create_job("tenant-1", 10)
+        job = await processor.create_job("tenant-1", 10)
         
         assert job.status == JobStatus.PENDING
         assert job.total_issues == 10
         assert job.processed_issues == 0
         assert job.job_id is not None
     
-    def test_get_job_returns_created_job(self, processor):
+    @pytest.mark.asyncio
+    async def test_get_job_returns_created_job(self, processor):
         """Should retrieve job by ID."""
-        job = processor.create_job("tenant-1", 5)
+        job = await processor.create_job("tenant-1", 5)
         
-        retrieved = processor.get_job(job.job_id)
+        retrieved = await processor.get_job(job.job_id)
         
         assert retrieved is not None
         assert retrieved.job_id == job.job_id
     
-    def test_get_nonexistent_job_returns_none(self, processor):
+    @pytest.mark.asyncio
+    async def test_get_nonexistent_job_returns_none(self, processor):
         """Should return None for unknown job ID."""
-        result = processor.get_job("nonexistent-id")
+        result = await processor.get_job("nonexistent-id")
         assert result is None
     
     def test_estimate_completion_time(self, processor):
@@ -70,9 +73,10 @@ class TestBackgroundProcessor:
         assert estimate >= 5  # At least 5 seconds
         assert estimate <= 60  # No more than a minute
     
-    def test_job_progress_calculation(self, processor):
+    @pytest.mark.asyncio
+    async def test_job_progress_calculation(self, processor):
         """Job should calculate progress correctly."""
-        job = processor.create_job("tenant-1", 10)
+        job = await processor.create_job("tenant-1", 10)
         
         assert job.progress_percent == 0.0
         
@@ -82,11 +86,11 @@ class TestBackgroundProcessor:
         job.processed_issues = 10
         assert job.progress_percent == 100.0
     
-    def test_job_progress_empty_batch(self, processor):
+    @pytest.mark.asyncio
+    async def test_job_progress_empty_batch(self, processor):
         """Empty batch should not cause division by zero."""
-        job = processor.create_job("tenant-1", 0)
+        job = await processor.create_job("tenant-1", 0)
         assert job.progress_percent == 0.0  # Not crash
-
 
 class TestAsyncProcessing:
     """Tests for async batch processing."""
@@ -130,7 +134,7 @@ class TestAsyncProcessing:
     @pytest.mark.asyncio
     async def test_batch_processing_updates_status(self, processor, sample_issue, mock_services):
         """Batch processing should update job status."""
-        job = processor.create_job("tenant-1", 1)
+        job = await processor.create_job("tenant-1", 1)
         
         await processor.process_batch_async(
             job_id=job.job_id,
@@ -147,7 +151,7 @@ class TestAsyncProcessing:
         # Make LLM service fail
         mock_services["llm"].generate_embeddings_batch.side_effect = Exception("API Error")
         
-        job = processor.create_job("tenant-1", 1)
+        job = await processor.create_job("tenant-1", 1)
         
         # Should not raise, just mark as failed
         await processor.process_batch_async(
@@ -228,15 +232,16 @@ class TestJobCleanup:
     def processor(self):
         return BackgroundProcessor()
     
-    def test_cleanup_removes_old_completed_jobs(self, processor):
+    @pytest.mark.asyncio
+    async def test_cleanup_removes_old_completed_jobs(self, processor):
         """Should clean up old completed jobs."""
         # Create an old job
-        job = processor.create_job("tenant-1", 1)
+        job = await processor.create_job("tenant-1", 1)
         job.status = JobStatus.COMPLETED
         job.completed_at = datetime(2020, 1, 1)  # Very old
         
         # Create a new job
-        new_job = processor.create_job("tenant-1", 1)
+        new_job = await processor.create_job("tenant-1", 1)
         new_job.status = JobStatus.COMPLETED
         new_job.completed_at = datetime.utcnow()
         
@@ -244,5 +249,5 @@ class TestJobCleanup:
         cleaned = processor.cleanup_old_jobs(max_age_seconds=60)
         
         assert cleaned == 1
-        assert processor.get_job(job.job_id) is None
-        assert processor.get_job(new_job.job_id) is not None
+        assert await processor.get_job(job.job_id) is None
+        assert await processor.get_job(new_job.job_id) is not None

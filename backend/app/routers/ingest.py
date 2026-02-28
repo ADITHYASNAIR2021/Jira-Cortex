@@ -15,6 +15,7 @@ from app.config import get_settings
 from app.models.schemas import (
     IngestBatchRequest,
     IngestSingleRequest,
+    IngestConfluenceBatchRequest,
     IngestResponse,
     ErrorResponse,
     UserContext
@@ -156,6 +157,51 @@ async def ingest_batch(
         estimated_completion_seconds=processor.estimate_completion_time(len(ingest_request.issues))
     )
 
+@router.post(
+    "/ingest/confluence/batch",
+    response_model=IngestResponse,
+    status_code=202,
+    summary="Ingest a batch of Confluence pages (async)"
+)
+@limiter.limit("10/minute")
+async def ingest_confluence_batch(
+    request: Request,
+    ingest_request: IngestConfluenceBatchRequest,
+    background_tasks: BackgroundTasks,
+    user: UserContext = Depends(get_current_user),
+    processor: BackgroundProcessor = Depends(get_background_processor),
+    billing_service: BillingService = Depends(get_billing_service)
+) -> IngestResponse:
+    settings = get_settings()
+    
+    if not await billing_service.is_tenant_allowed(user.tenant_id):
+        raise HTTPException(status_code=403, detail={"error": "SUBSCRIPTION_REQUIRED", "message": "Not subscribed."})
+        
+    estimated_batch_cost = len(ingest_request.pages) * 0.001
+    if not await billing_service.has_sufficient_funds(user.tenant_id, estimated_batch_cost):
+        raise HTTPException(status_code=402, detail={"error": "INSUFFICIENT_CREDITS", "message": "Insufficient credits"})
+        
+    if len(ingest_request.pages) > settings.ingestion_batch_size:
+        raise HTTPException(status_code=400, detail={"error": "BATCH_TOO_LARGE", "message": f"Max {settings.ingestion_batch_size}"})
+        
+    if ingest_request.tenant_id != user.tenant_id:
+        raise HTTPException(status_code=403, detail={"error": "TENANT_MISMATCH", "message": "Tenant mismatch"})
+        
+    job = await processor.create_job(tenant_id=ingest_request.tenant_id, issue_count=len(ingest_request.pages))
+    
+    background_tasks.add_task(
+        processor.process_confluence_batch_async,
+        job_id=job.job_id,
+        pages=ingest_request.pages,
+        tenant_id=ingest_request.tenant_id
+    )
+    
+    return IngestResponse(
+        job_id=job.job_id,
+        status="accepted",
+        message=f"Processing {len(ingest_request.pages)} pages in background",
+        estimated_completion_seconds=processor.estimate_completion_time(len(ingest_request.pages))
+    )
 
 @router.post(
     "/ingest/single",
@@ -322,6 +368,40 @@ async def delete_tenant_data(
         raise HTTPException(
             status_code=500, 
             detail={"error": "INTERNAL_ERROR", "message": "Failed to wipe tenant data"}
+        )
+
+
+@router.post(
+    "/tenant/provision",
+    responses={
+        401: {"model": ErrorResponse},
+        403: {"model": ErrorResponse}
+    },
+    summary="Handle app installation (Provision tenant)"
+)
+@limiter.limit("5/minute")
+async def provision_tenant_data(
+    request: Request,
+    provision_req: TenantProvisionRequest,
+    user: UserContext = Depends(get_current_user)
+) -> dict:
+    if provision_req.tenant_id != user.tenant_id:
+        raise HTTPException(
+            status_code=403, 
+            detail={"error": "TENANT_MISMATCH", "message": "Tenant mismatch"}
+        )
+        
+    try:
+        vector_store = get_vector_store()
+        await vector_store.initialize_collection()
+        
+        logger.info("tenant_data_provisioned", tenant_id=provision_req.tenant_id)
+        return {"status": "success", "message": "Tenant successfully provisioned"}
+    except Exception as e:
+        logger.error("tenant_provision_failed", error=str(e))
+        raise HTTPException(
+            status_code=500, 
+            detail={"error": "INTERNAL_ERROR", "message": "Failed to provision tenant data"}
         )
 
 

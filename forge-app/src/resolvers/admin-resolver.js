@@ -6,7 +6,7 @@
 
 import Resolver from '@forge/resolver';
 import { storage, getContext } from '@forge/api';
-import { ingestBatch, getUsageStats, setBackendUrl, getJobStatus } from '../api/backend';
+import { ingestBatch, getUsageStats, setBackendUrl, getJobStatus, provisionTenant } from '../api/backend';
 
 const resolver = new Resolver();
 
@@ -109,6 +109,20 @@ resolver.define('getJobStatus', async (req) => {
     } catch (err) {
         console.warn('Job status error:', err);
         return { status: 'unknown', error: err.message };
+    }
+});
+
+/**
+ * Provision tenant data / initialize backend
+ */
+resolver.define('provisionTenant', async () => {
+    const context = await getContext();
+    try {
+        const response = await provisionTenant(context.cloudId);
+        return response;
+    } catch (err) {
+        console.error('Provision tenant error:', err);
+        throw new Error(err.message || 'Failed to provision tenant');
     }
 });
 

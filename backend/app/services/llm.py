@@ -205,7 +205,8 @@ When providing a solution:
         self,
         query: str,
         search_results: List[SearchResult],
-        additional_context: Optional[str] = None
+        additional_context: Optional[str] = None,
+        conversation_history: Optional[List[dict]] = None
     ) -> LLMResponse:
         """
         Generate answer using RAG with strict hallucination controls.
@@ -249,12 +250,15 @@ CONFIDENCE: [score]
 ANSWER: [your answer with citations]"""
 
         try:
+            messages = [{"role": "system", "content": self.SYSTEM_PROMPT}]
+            if conversation_history:
+                messages.extend(conversation_history)
+            
+            messages.append({"role": "user", "content": user_prompt})
+
             response = await self.client.chat.completions.create(
                 model=self.settings.openai_chat_model,
-                messages=[
-                    {"role": "system", "content": self.SYSTEM_PROMPT},
-                    {"role": "user", "content": user_prompt}
-                ],
+                messages=messages,
                 temperature=self.settings.openai_temperature,  # 0.1 for strict
                 max_tokens=self.settings.openai_max_tokens,
                 top_p=0.9,
@@ -348,13 +352,9 @@ ANSWER: [your answer with citations]"""
             return False
 
 
-# Singleton instance
-_llm_service: Optional[LLMService] = None
+from functools import lru_cache
 
-
+@lru_cache(maxsize=1)
 def get_llm_service() -> LLMService:
     """Get or create LLM service singleton."""
-    global _llm_service
-    if _llm_service is None:
-        _llm_service = LLMService()
-    return _llm_service
+    return LLMService()

@@ -4,11 +4,14 @@ Jira Cortex - Pydantic Schemas
 Type-safe request/response models with validation.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field, field_validator
 import re
+
+def utc_now():
+    return datetime.now(timezone.utc)
 
 
 class IssueStatus(str, Enum):
@@ -36,6 +39,10 @@ class QueryRequest(BaseModel):
     context: Optional[Dict[str, Any]] = Field(
         default=None,
         description="Additional context from current issue"
+    )
+    session_id: Optional[str] = Field(
+        default=None,
+        description="Session ID for Conversational Memory"
     )
     
     @field_validator("query")
@@ -132,6 +139,28 @@ class IngestSingleRequest(BaseModel):
         description="Type of change event"
     )
 
+class ConfluencePage(BaseModel):
+    """Confluence page for ingestion."""
+    page_id: str = Field(..., description="Confluence Page ID")
+    title: str = Field(..., max_length=500)
+    body: Optional[str] = Field(default=None, max_length=500000)
+    space_key: str = Field(..., description="Space key (mapped to project_id)")
+    url: str = Field(..., description="Web link to the page")
+    author_account_id: Optional[str] = Field(default=None)
+    created: datetime
+    updated: datetime
+    labels: List[str] = Field(default_factory=list)
+
+class IngestConfluenceBatchRequest(BaseModel):
+    """Batch ingestion request for Confluence."""
+    pages: List[ConfluencePage] = Field(
+        ..., 
+        min_length=1, 
+        max_length=50
+    )
+    tenant_id: str = Field(..., description="Tenant identifier for ACL")
+    force_update: bool = False
+
 
 class IngestResponse(BaseModel):
     """Response for async ingestion."""
@@ -174,7 +203,7 @@ class UsageRecord(BaseModel):
     """Token usage record for billing."""
     tenant_id: str
     user_account_id: str
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=utc_now)
     operation: str = Field(..., pattern=r'^(query|ingest)$')
     input_tokens: int = Field(..., ge=0)
     output_tokens: int = Field(..., ge=0)
@@ -194,5 +223,5 @@ class HealthStatus(BaseModel):
     """Service health check response."""
     status: str = Field(..., pattern=r'^(healthy|degraded|unhealthy)$')
     version: str
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=utc_now)
     dependencies: Dict[str, str] = Field(default_factory=dict)

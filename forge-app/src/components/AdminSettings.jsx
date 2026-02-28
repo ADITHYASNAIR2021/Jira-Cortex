@@ -7,8 +7,8 @@
  * - Configuration management
  */
 
-import React, { useState, useEffect } from 'react';
-import ForgeReconciler, {
+import { useState, useEffect } from 'react';
+import {
     Button,
     Text,
     Box,
@@ -63,6 +63,7 @@ export function AdminSettings() {
     // Job tracking for accurate progress (UX fix)
     const [activeJobs, setActiveJobs] = useState([]);  // {jobId, status, progress}
     const [processingStatus, setProcessingStatus] = useState(null);  // 'processing' | 'complete'
+    const [provisionStatus, setProvisionStatus] = useState('idle'); // idle, provisioning, completed, error
 
     // Fetch projects on mount
     useEffect(() => {
@@ -180,7 +181,6 @@ export function AdminSettings() {
 
         try {
             // Fetch issues from selected projects in batches
-            let allIssues = [];
             let totalProcessed = 0;
             let totalFailed = 0;
 
@@ -237,6 +237,21 @@ export function AdminSettings() {
     };
 
     /**
+     * Start backend initialization
+     */
+    const handleProvision = async () => {
+        setProvisionStatus('provisioning');
+        setError(null);
+        try {
+            await invoke('provisionTenant');
+            setProvisionStatus('completed');
+        } catch (err) {
+            setError(err.message || 'Initialization failed');
+            setProvisionStatus('error');
+        }
+    };
+
+    /**
      * Fetch all issues for a project
      */
     const fetchProjectIssues = async (projectKey) => {
@@ -245,7 +260,8 @@ export function AdminSettings() {
         const maxResults = 100;
 
         try {
-            while (true) {
+            // Safe loop bounded to 50 iterations (max 5000 issues)
+            for (let loopCount = 0; loopCount < 50; loopCount++) {
                 const response = await requestJira(
                     `/rest/api/3/search?jql=project=${projectKey}&startAt=${startAt}&maxResults=${maxResults}&fields=summary,description,status,project,reporter,assignee,created,updated,resolutiondate,labels,components`,
                     {
@@ -363,6 +379,29 @@ export function AdminSettings() {
                         </Stack>
                     </Box>
                 )}
+
+                {/* App Initialization Section */}
+                <Box xcss={cardStyles}>
+                    <Stack space="space.200">
+                        <Heading as="h3">Initialize App</Heading>
+                        <Text>
+                            Before you can use Cortex or sync data, you must initialize the backend vector database for your Jira instance.
+                            You only need to do this once.
+                        </Text>
+                        <Inline space="space.100" alignBlock="center">
+                            <Button
+                                appearance="primary"
+                                onClick={handleProvision}
+                                isDisabled={provisionStatus === 'provisioning' || provisionStatus === 'completed'}
+                            >
+                                {provisionStatus === 'provisioning' ? 'Initializing...' : provisionStatus === 'completed' ? 'Initialized' : 'Initialize App'}
+                            </Button>
+                            {provisionStatus === 'completed' && (
+                                <Badge appearance="success">App is ready!</Badge>
+                            )}
+                        </Inline>
+                    </Stack>
+                </Box>
 
                 {/* Data Sync Section */}
                 <Box xcss={cardStyles}>

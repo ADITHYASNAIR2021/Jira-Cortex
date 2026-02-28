@@ -14,7 +14,7 @@ const resolver = new Resolver();
  * Query resolver - called by UI components
  */
 resolver.define('queryResolver', async (req) => {
-    const { query, context } = req.payload;
+    const { query, context, sessionId } = req.payload;
 
     if (!query || typeof query !== 'string') {
         throw new Error('Query is required');
@@ -29,7 +29,7 @@ resolver.define('queryResolver', async (req) => {
     }
 
     try {
-        const response = await queryKnowledgeBase(query, context);
+        const response = await queryKnowledgeBase(query, context, sessionId);
         return response;
     } catch (err) {
         console.error('Query resolver error:', err);

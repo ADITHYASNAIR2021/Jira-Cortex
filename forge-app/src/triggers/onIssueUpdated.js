@@ -8,7 +8,7 @@
  */
 
 import api, { route } from '@forge/api';
-import { ingestSingle, uninstallApp } from '../api/backend';
+import { ingestSingle, uninstallApp, queryKnowledgeBase } from '../api/backend';
 
 // Error class for transient failures that should be retried
 class TransientError extends Error {
@@ -131,6 +131,56 @@ export async function onIssueChange(event, context) {
         const result = await ingestSingle(issueData, cloudId, eventType);
 
         console.log(`Issue synced: ${issue.key}`, result);
+
+        // Proactive Duplicate Detection ONLY on creation
+        if (eventType === 'created') {
+            try {
+                console.log(`Running proactive duplicate detection for ${issue.key}`);
+                const queryResponse = await queryKnowledgeBase(
+                    `Are there any existing issues similar to this? ${issue.summary}`,
+                    null
+                );
+
+                if (queryResponse && queryResponse.confidence_score >= 70) {
+                    // Add an internal comment with ADF
+                    const commentBody = {
+                        body: {
+                            type: "doc",
+                            version: 1,
+                            content: [
+                                {
+                                    type: "paragraph",
+                                    content: [
+                                        {
+                                            type: "text",
+                                            text: `🤖 Cortex AI has detected this might be a related or duplicate issue (Confidence: ${Math.round(queryResponse.confidence_score)}%).\n\n${queryResponse.answer}`
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    };
+
+                    const commentRes = await api.asApp().requestJira(route`/rest/api/3/issue/${issue.id}/comment`, {
+                        method: 'POST',
+                        headers: {
+                            'Accept': 'application/json',
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(commentBody)
+                    });
+
+                    if (!commentRes.ok) {
+                        console.warn(`Failed to add duplicate comment to ${issue.key}: ${commentRes.status}`);
+                    } else {
+                        console.log(`Successfully added duplicate comment to ${issue.key}`);
+                    }
+                }
+            } catch (queryErr) {
+                console.warn(`Duplicate detection failed for ${issue.key}:`, queryErr.message);
+                // Do not throw, this is a non-critical enhancement
+            }
+        }
 
         return {
             success: true,

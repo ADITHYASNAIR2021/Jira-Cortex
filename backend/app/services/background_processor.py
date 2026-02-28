@@ -9,12 +9,15 @@ import asyncio
 import uuid
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 import structlog
 
+def utc_now():
+    return datetime.now(timezone.utc)
+
 from app.config import get_settings
-from app.models.schemas import JiraIssue
+from app.models.schemas import JiraIssue, ConfluencePage
 from app.services.vector_store import get_vector_store
 from app.services.llm import get_llm_service
 from app.services.billing import get_billing_service
@@ -41,7 +44,7 @@ class IngestionJob:
     processed_issues: int = 0
     failed_issues: int = 0
     total_tokens_used: int = 0  # FIXED: Track tokens for billing
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=utc_now)
     completed_at: Optional[datetime] = None
     error_message: Optional[str] = None
     
@@ -170,7 +173,7 @@ class BackgroundProcessor:
                         # Mark as failed - server restarted mid-processing
                         job_data["status"] = JobStatus.FAILED.value
                         job_data["error_message"] = "Server restarted during processing"
-                        job_data["completed_at"] = datetime.utcnow().isoformat()
+                        job_data["completed_at"] = utc_now().isoformat()
                         await redis.setex(key, self.JOB_TTL_SECONDS, json.dumps(job_data))
                         logger.warning(
                             "orphaned_job_recovered",
@@ -352,7 +355,7 @@ class BackgroundProcessor:
             
             # Mark job complete
             job.status = JobStatus.COMPLETED
-            job.completed_at = datetime.utcnow()
+            job.completed_at = utc_now()
             job.total_tokens_used = total_tokens_used
             
             logger.info(
@@ -366,7 +369,7 @@ class BackgroundProcessor:
         except Exception as e:
             job.status = JobStatus.FAILED
             job.error_message = str(e)
-            job.completed_at = datetime.utcnow()
+            job.completed_at = utc_now()
             
             logger.error(
                 "ingestion_job_failed",
@@ -435,6 +438,138 @@ class BackgroundProcessor:
         )
         
         return True, tokens_used
+
+    async def _process_single_confluence_page_with_usage(
+        self,
+        page: ConfluencePage,
+        tenant_id: str,
+        text_processor,
+        llm_service,
+        vector_store
+    ) -> Tuple[bool, int]:
+        # Format text
+        formatted_text = text_processor.format_confluence_page_for_embedding(
+            page_id=page.page_id,
+            title=page.title,
+            body=page.body,
+            space_key=page.space_key,
+            labels=page.labels
+        )
+        
+        # Process text
+        chunks, secrets_masked = text_processor.process(
+            text=formatted_text,
+            doc_id=page.page_id,
+            is_html=False
+        )
+        
+        if not chunks:
+            return True, 0
+            
+        chunk_texts = [c.content for c in chunks]
+        embeddings, tokens_used = await llm_service.generate_embeddings_batch_with_usage(chunk_texts)
+        
+        await vector_store.upsert_chunks(
+            chunks=chunks,
+            embeddings=embeddings,
+            issue_key=f"{page.space_key}-{page.page_id}",
+            issue_title=page.title,
+            project_id=page.space_key,
+            tenant_id=tenant_id,
+            issue_url=page.url,
+            additional_metadata={
+                "page_id": page.page_id,
+                "space_key": page.space_key,
+                "labels": page.labels,
+                "created": page.created.isoformat(),
+                "updated": page.updated.isoformat(),
+                "document_type": "confluence_page"
+            }
+        )
+        return True, tokens_used
+        
+    async def process_confluence_batch_async(
+        self,
+        job_id: str,
+        pages: List[ConfluencePage],
+        tenant_id: str
+    ) -> None:
+        job = self._jobs.get(job_id)
+        if not job:
+            return
+            
+        job.status = JobStatus.PROCESSING
+        
+        text_processor = get_text_processor()
+        llm_service = get_llm_service()
+        vector_store = get_vector_store()
+        billing_service = get_billing_service()
+        
+        total_tokens_used = 0
+        
+        try:
+            for batch_start in range(0, len(pages), self.BATCH_SIZE):
+                batch = pages[batch_start:batch_start + self.BATCH_SIZE]
+                semaphore = asyncio.Semaphore(self.MAX_CONCURRENT_EMBEDDINGS)
+                
+                async def process_page(page: ConfluencePage) -> Tuple[bool, int]:
+                    async with semaphore:
+                        try:
+                            return await self._process_single_confluence_page_with_usage(
+                                page=page,
+                                tenant_id=tenant_id,
+                                text_processor=text_processor,
+                                llm_service=llm_service,
+                                vector_store=vector_store
+                            )
+                        except Exception as e:
+                            logger.error("confluence_processing_failed", page_id=page.page_id, error=str(e))
+                            return False, 0
+                
+                results = await asyncio.gather(
+                    *[process_page(p) for p in batch],
+                    return_exceptions=True
+                )
+                
+                for result in results:
+                    if isinstance(result, tuple):
+                        success, tokens = result
+                        if success:
+                            job.processed_issues += 1
+                            total_tokens_used += tokens
+                        else:
+                            job.failed_issues += 1
+                    else:
+                        job.failed_issues += 1
+                
+                batch_tokens = sum(t for _, t in results if isinstance(_, tuple) and _)
+                if batch_tokens > 0:
+                    await billing_service.record_usage(
+                        tenant_id=tenant_id,
+                        user_account_id="system",
+                        operation="ingest_batch",
+                        input_tokens=batch_tokens,
+                        output_tokens=0,
+                        model=self.settings.openai_embedding_model,
+                        cached=False
+                    )
+                    batch_cost = billing_service.calculate_embedding_cost(batch_tokens)
+                    await billing_service.deduct_balance(
+                        tenant_id=tenant_id,
+                        cost=batch_cost,
+                        description=f"Confluence batch ingestion: {len(batch)} pages"
+                    )
+                
+                await self._persist_job(job)
+            
+            job.status = JobStatus.COMPLETED
+            job.completed_at = utc_now()
+            job.total_tokens_used = total_tokens_used
+            
+        except Exception as e:
+            job.status = JobStatus.FAILED
+            job.error_message = str(e)
+            job.completed_at = utc_now()
     
     async def process_single_issue_sync(
         self,
@@ -495,7 +630,7 @@ class BackgroundProcessor:
         Returns:
             Number of jobs cleaned up
         """
-        now = datetime.utcnow()
+        now = utc_now()
         to_remove = []
         
         for job_id, job in self._jobs.items():
@@ -513,13 +648,9 @@ class BackgroundProcessor:
         return len(to_remove)
 
 
-# Singleton instance
-_background_processor: Optional[BackgroundProcessor] = None
+from functools import lru_cache
 
-
+@lru_cache(maxsize=1)
 def get_background_processor() -> BackgroundProcessor:
     """Get or create background processor singleton."""
-    global _background_processor
-    if _background_processor is None:
-        _background_processor = BackgroundProcessor()
-    return _background_processor
+    return BackgroundProcessor()
