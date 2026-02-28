@@ -6,9 +6,7 @@ Implements strict validation with timing attack prevention.
 """
 
 import time
-import hashlib
 import hmac
-from datetime import datetime, timezone
 from typing import Optional, Tuple
 import structlog
 import jwt

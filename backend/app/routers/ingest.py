@@ -5,9 +5,7 @@ Async batch ingestion and real-time webhook updates.
 Solves Trap 1 (Forge timeout) and Trap 2 (stale data).
 """
 
-import uuid
-from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Header, BackgroundTasks, Request
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 import structlog
@@ -20,14 +18,10 @@ from app.models.schemas import (
     ErrorResponse,
     UserContext
 )
-from app.auth.jwt_validator import (
-    get_jwt_validator,
-    JWTValidationError
-)
+
 from app.services.background_processor import (
     get_background_processor,
-    BackgroundProcessor,
-    JobStatus
+    BackgroundProcessor
 )
 from app.auth.dependencies import get_current_user
 from app.services.cache import get_cache_service, CacheService

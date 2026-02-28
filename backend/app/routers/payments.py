@@ -5,7 +5,6 @@ Stripe integration for the pre-paid wallet system.
 Handles checkout sessions, webhooks, and balance management.
 """
 
-import uuid
 import stripe
 from fastapi import APIRouter, HTTPException, Request, Depends
 from pydantic import BaseModel
