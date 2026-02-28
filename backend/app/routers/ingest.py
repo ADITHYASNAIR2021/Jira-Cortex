@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 import structlog
+from pydantic import BaseModel
 
 from app.config import get_settings
 from app.models.schemas import (
@@ -23,6 +24,7 @@ from app.services.background_processor import (
     get_background_processor,
     BackgroundProcessor
 )
+from app.services.vector_store import get_vector_store
 from app.auth.dependencies import get_current_user
 from app.services.cache import get_cache_service, CacheService
 from app.services.billing import get_billing_service, BillingService
@@ -282,6 +284,44 @@ async def ingest_single(
                 "error": "INTERNAL_ERROR",
                 "message": "Failed to process issue"
             }
+        )
+
+
+class TenantProvisionRequest(BaseModel):
+    tenant_id: str
+
+@router.delete(
+    "/tenant/provision",
+    responses={
+        401: {"model": ErrorResponse},
+        403: {"model": ErrorResponse}
+    },
+    summary="Handle app uninstallation (GDPR data wipe)"
+)
+@limiter.limit("5/minute")
+async def delete_tenant_data(
+    request: Request,
+    provision_req: TenantProvisionRequest,
+    user: UserContext = Depends(get_current_user)
+) -> dict:
+    # Verify tenant matches JWT context
+    if provision_req.tenant_id != user.tenant_id:
+        raise HTTPException(
+            status_code=403, 
+            detail={"error": "TENANT_MISMATCH", "message": "Tenant mismatch"}
+        )
+        
+    try:
+        vector_store = get_vector_store()
+        await vector_store.delete_tenant(provision_req.tenant_id)
+        
+        logger.info("tenant_data_wiped", tenant_id=provision_req.tenant_id)
+        return {"status": "success", "message": "Tenant data wiped"}
+    except Exception as e:
+        logger.error("tenant_wipe_failed", error=str(e))
+        raise HTTPException(
+            status_code=500, 
+            detail={"error": "INTERNAL_ERROR", "message": "Failed to wipe tenant data"}
         )
 
 

@@ -41,6 +41,11 @@ modules:
       events:
         - avi:jira:deleted:issue
 
+    - key: app-uninstalled-trigger
+      function: onAppUninstalled
+      events:
+        - avi:jira:uninstalled:app
+
   # Functions
   function:
     - key: contextPanelHandler
@@ -60,6 +65,9 @@ modules:
 
     - key: onIssueDelete
       handler: src/triggers/onIssueUpdated.onIssueDelete
+
+    - key: onAppUninstalled
+      handler: src/triggers/onIssueUpdated.onAppUninstalled
 
   # Resources (UI Kit 2)
   resources:

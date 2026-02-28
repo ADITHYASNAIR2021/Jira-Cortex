@@ -58,52 +58,69 @@ async function getAuthHeader() {
 }
 
 /**
- * Make authenticated request to backend
+ * Make authenticated request to backend with exponential backoff
  */
-async function apiRequest(endpoint, options = {}) {
+async function apiRequest(endpoint, options = {}, retries = 3) {
     const headers = await getAuthHeader();
     const backendUrl = await getBackendUrl();
 
     const url = `${backendUrl}${endpoint}`;
 
-    try {
-        const response = await fetch(url, {
-            ...options,
-            headers: {
-                ...headers,
-                ...options.headers
+    for (let i = 0; i < retries; i++) {
+        try {
+            const response = await fetch(url, {
+                ...options,
+                headers: {
+                    ...headers,
+                    ...options.headers
+                }
+            });
+
+            if (!response.ok) {
+                // Determine if error is retryable (429 Rate Limit or 5xx Server Error)
+                const retryable = response.status >= 500 || response.status === 429;
+                
+                // If retryable and we have retries left, delay and continue loop
+                if (retryable && i < retries - 1) {
+                    const delay = Math.pow(2, i) * 1000 + Math.random() * 500;
+                    console.warn(`Request failed with ${response.status}. Retrying in ${Math.round(delay)}ms...`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    continue;
+                }
+
+                // If not retryable or out of retries, throw parsed error
+                const errorData = await response.json().catch(() => ({}));
+                throw new CortexAPIError(
+                    errorData.message || `Request failed with status ${response.status}`,
+                    response.status,
+                    errorData.error || 'UNKNOWN_ERROR',
+                    retryable
+                );
             }
-        });
 
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
+            return await response.json();
 
-            // Determine if error is retryable
-            const retryable = response.status >= 500 || response.status === 429;
+        } catch (error) {
+            if (error instanceof CortexAPIError) {
+                throw error;
+            }
 
+            // Network or other error - likely transient
+            if (i < retries - 1) {
+                const delay = Math.pow(2, i) * 1000 + Math.random() * 500;
+                console.warn(`Network error: ${error.message}. Retrying in ${Math.round(delay)}ms...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+                continue;
+            }
+
+            console.error('Backend request failed:', error.message);
             throw new CortexAPIError(
-                errorData.message || `Request failed with status ${response.status}`,
-                response.status,
-                errorData.error || 'UNKNOWN_ERROR',
-                retryable
+                'Unable to connect to Cortex backend',
+                503,
+                'CONNECTION_ERROR',
+                true  // Network errors are retryable
             );
         }
-
-        return await response.json();
-
-    } catch (error) {
-        if (error instanceof CortexAPIError) {
-            throw error;
-        }
-
-        // Network or other error - likely transient
-        console.error('Backend request failed:', error.message);
-        throw new CortexAPIError(
-            'Unable to connect to Cortex backend',
-            503,
-            'CONNECTION_ERROR',
-            true  // Network errors are retryable
-        );
     }
 }
 
@@ -202,6 +219,21 @@ export async function healthCheck() {
  */
 export async function setBackendUrl(url) {
     await storage.set('backendUrl', url);
+}
+
+/**
+ * Notify backend of app uninstallation (GDPR data wipe)
+ *
+ * @param {string} tenantId - Tenant identifier
+ * @returns {Promise<Object>} Response
+ */
+export async function uninstallApp(tenantId) {
+    return apiRequest('/api/v1/tenant/provision', {
+        method: 'DELETE',
+        body: JSON.stringify({
+            tenant_id: tenantId
+        })
+    });
 }
 
 export { CortexAPIError };

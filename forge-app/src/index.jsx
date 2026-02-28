@@ -8,6 +8,7 @@ import Resolver from '@forge/resolver';
 import { ContextPanel } from './components/ContextPanel';
 import { OmniSearch } from './components/OmniSearch';
 import { AdminSettings } from './components/AdminSettings';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 // Resolver for data fetching
 const resolver = new Resolver();
@@ -17,7 +18,11 @@ const resolver = new Resolver();
  * Renders the AI assistant panel in issue sidebar
  */
 export const contextPanelHandler = () => {
-  return <ContextPanel />;
+  return (
+    <ErrorBoundary>
+      <ContextPanel />
+    </ErrorBoundary>
+  );
 };
 
 /**
@@ -25,7 +30,11 @@ export const contextPanelHandler = () => {
  * Renders the global search/chat interface
  */
 export const omniSearchHandler = () => {
-  return <OmniSearch />;
+  return (
+    <ErrorBoundary>
+      <OmniSearch />
+    </ErrorBoundary>
+  );
 };
 
 /**
@@ -33,7 +42,11 @@ export const omniSearchHandler = () => {
  * Renders the admin configuration and sync page
  */
 export const adminSettingsHandler = () => {
-  return <AdminSettings />;
+  return (
+    <ErrorBoundary>
+      <AdminSettings />
+    </ErrorBoundary>
+  );
 };
 
 // Export resolver

@@ -8,7 +8,7 @@
  */
 
 import api, { route } from '@forge/api';
-import { ingestSingle } from '../api/backend';
+import { ingestSingle, uninstallApp } from '../api/backend';
 
 // Error class for transient failures that should be retried
 class TransientError extends Error {
@@ -209,5 +209,27 @@ export async function onIssueDelete(event, context) {
             issueKey: issue.key,
             error: err.message
         };
+    }
+}
+
+/**
+ * Handle app uninstallation (GDPR compliance)
+ */
+export async function onAppUninstalled(event, context) {
+    const cloudId = context.cloudId;
+    
+    console.log(`App uninstalled for tenant: ${cloudId}`);
+    
+    try {
+        await uninstallApp(cloudId);
+        console.log(`Successfully wiped data for ${cloudId}`);
+        return { success: true };
+    } catch (err) {
+        console.error(`Failed to wipe data for ${cloudId}:`, err.message);
+        // Throw to trigger retry if the backend is down during uninstall
+        if (err.retryable || err.message.includes('503')) {
+            throw new Error(`Transient failure wiping data: ${err.message}`);
+        }
+        return { success: false, error: err.message };
     }
 }

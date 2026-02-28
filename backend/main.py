@@ -169,6 +169,20 @@ All endpoints require a valid Atlassian JWT token in the Authorization header.
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
     
+    # Global exception handler
+    @app.exception_handler(Exception)
+    async def global_exception_handler(request: Request, exc: Exception):
+        logger.error(
+            "unhandled_exception",
+            method=request.method,
+            url=str(request.url),
+            error=str(exc)
+        )
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "An unexpected internal server error occurred. Please contact support."}
+        )
+    
     # CORS middleware
     app.add_middleware(
         CORSMiddleware,

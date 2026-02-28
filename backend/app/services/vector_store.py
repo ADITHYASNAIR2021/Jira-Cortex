@@ -334,6 +334,31 @@ class VectorStore:
         except Exception as e:
             logger.error("delete_failed", issue_key=issue_key, error=str(e))
             raise VectorStoreError(f"Delete failed: {e}")
+            
+    async def delete_tenant(self, tenant_id: str) -> int:
+        """
+        Delete all chunks for a tenant due to app uninstallation.
+        """
+        try:
+            self.client.delete(
+                collection_name=self.settings.qdrant_collection_name,
+                points_selector=models.FilterSelector(
+                    filter=models.Filter(
+                        must=[
+                            models.FieldCondition(
+                                key="tenant_id",
+                                match=models.MatchValue(value=tenant_id)
+                            )
+                        ]
+                    )
+                ),
+                wait=True
+            )
+            logger.info("tenant_deleted", tenant_id=tenant_id)
+            return 1
+        except Exception as e:
+            logger.error("delete_tenant_failed", tenant_id=tenant_id, error=str(e))
+            raise VectorStoreError(f"Delete tenant failed: {e}")
     
     async def health_check(self) -> bool:
         """Check if vector store is healthy."""
