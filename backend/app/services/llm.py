@@ -8,6 +8,7 @@ from typing import List, Optional, Tuple
 from dataclasses import dataclass
 import structlog
 from openai import AsyncOpenAI, OpenAIError
+from functools import lru_cache
 
 from app.config import get_settings
 from app.services.vector_store import SearchResult
@@ -351,8 +352,6 @@ ANSWER: [your answer with citations]"""
         except Exception:
             return False
 
-
-from functools import lru_cache
 
 @lru_cache(maxsize=1)
 def get_llm_service() -> LLMService:

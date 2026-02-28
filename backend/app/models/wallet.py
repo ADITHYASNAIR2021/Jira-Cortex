@@ -9,10 +9,10 @@ from sqlalchemy import Column, String, Float, Boolean, DateTime, Integer, Foreig
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 
+from app.services.billing import Base
+
 def utc_now():
     return datetime.now(timezone.utc)
-
-from app.services.billing import Base
 
 
 class TenantWallet(Base):

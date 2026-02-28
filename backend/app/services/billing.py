@@ -6,7 +6,6 @@ Saves token consumption to PostgreSQL for billing.
 """
 
 from datetime import datetime, date, timezone
-from typing import Optional
 from contextlib import asynccontextmanager
 import structlog
 from sqlalchemy import (
@@ -14,13 +13,15 @@ from sqlalchemy import (
     Index, func
 )
 
-def utc_now():
-    return datetime.now(timezone.utc)
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy.future import select
+from functools import lru_cache
 
 from app.config import get_settings
+
+def utc_now():
+    return datetime.now(timezone.utc)
 
 logger = structlog.get_logger(__name__)
 
@@ -404,7 +405,7 @@ class BillingService:
         Deducts cost from wallet atomically.
         Returns False if wallet doesn't exist.
         """
-        from app.models.wallet import TenantWallet, PaymentTransaction
+        from app.models.wallet import PaymentTransaction
         import uuid
         
         if self.settings.app_env == "development":
@@ -457,7 +458,7 @@ class BillingService:
                 "balance_deducted",
                 tenant_id=tenant_id,
                 cost=cost,
-                new_balance=wallet.balance
+                new_balance=new_balance
             )
             
             return True
@@ -604,8 +605,6 @@ class BillingService:
         if self._engine:
             await self._engine.dispose()
 
-
-from functools import lru_cache
 
 @lru_cache(maxsize=1)
 def get_billing_service() -> BillingService:

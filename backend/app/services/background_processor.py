@@ -12,9 +12,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 import structlog
-
-def utc_now():
-    return datetime.now(timezone.utc)
+from functools import lru_cache
 
 from app.config import get_settings
 from app.models.schemas import JiraIssue, ConfluencePage
@@ -22,6 +20,9 @@ from app.services.vector_store import get_vector_store
 from app.services.llm import get_llm_service
 from app.services.billing import get_billing_service
 from app.utils.text_processing import get_text_processor
+
+def utc_now():
+    return datetime.now(timezone.utc)
 
 logger = structlog.get_logger(__name__)
 
@@ -647,8 +648,6 @@ class BackgroundProcessor:
         
         return len(to_remove)
 
-
-from functools import lru_cache
 
 @lru_cache(maxsize=1)
 def get_background_processor() -> BackgroundProcessor:

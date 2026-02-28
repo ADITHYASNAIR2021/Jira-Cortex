@@ -392,7 +392,7 @@ class TextProcessor:
         Format a Confluence page into text for embedding.
         """
         parts = [
-            f"Type: Confluence Page",
+            "Type: Confluence Page",
             f"Space: {space_key}",
             f"Page ID: {page_id}",
             f"Title: {title}",

@@ -8,6 +8,7 @@ import uuid
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
 import structlog
+from functools import lru_cache
 from qdrant_client import AsyncQdrantClient, models
 
 from app.config import get_settings
@@ -370,8 +371,6 @@ class VectorStore:
         except Exception:
             return False
 
-
-from functools import lru_cache
 
 @lru_cache(maxsize=1)
 def get_vector_store() -> VectorStore:

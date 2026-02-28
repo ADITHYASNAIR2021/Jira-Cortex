@@ -8,6 +8,7 @@ import json
 import hashlib
 from typing import Optional
 import structlog
+from functools import lru_cache
 import redis.asyncio as redis
 
 from app.config import get_settings
@@ -295,8 +296,6 @@ class CacheService:
             await self._client.close()
             self._client = None
 
-
-from functools import lru_cache
 
 @lru_cache(maxsize=1)
 def get_cache_service() -> CacheService:
