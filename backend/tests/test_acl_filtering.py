@@ -7,7 +7,7 @@ Tests for permission-aware vector search.
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from app.services.vector_store import VectorStore, SearchResult
-
+from qdrant_client import models
 
 class TestACLFiltering:
     """Tests for ACL-based access control."""
@@ -17,7 +17,7 @@ class TestACLFiltering:
         monkeypatch.setattr("app.services.vector_store.get_settings", lambda: mock_settings)
         store = VectorStore()
         # Mock Qdrant client
-        store._client = MagicMock()
+        store._client = AsyncMock()
         return store
     
     @pytest.mark.asyncio
@@ -36,7 +36,7 @@ class TestACLFiltering:
     async def test_search_builds_correct_filter(self, vector_store):
         """Search should build proper ACL filter."""
         # Mock search to capture the filter
-        mock_search = MagicMock()
+        mock_search = AsyncMock()
         mock_search.return_value = []
         vector_store.client.search = mock_search
         
@@ -72,7 +72,7 @@ class TestACLFiltering:
             "metadata": {}
         }
         
-        vector_store.client.search = MagicMock(return_value=[mock_result])
+        vector_store.client.search = AsyncMock(return_value=[mock_result])
         
         results = await vector_store.search(
             query_embedding=[0.1] * 1536,
@@ -93,7 +93,7 @@ class TestTenantIsolation:
     def vector_store(self, mock_settings, monkeypatch):
         monkeypatch.setattr("app.services.vector_store.get_settings", lambda: mock_settings)
         store = VectorStore()
-        store._client = MagicMock()
+        store._client = AsyncMock()
         return store
     
     @pytest.mark.asyncio
@@ -109,7 +109,7 @@ class TestTenantIsolation:
             content_hash="abc123"
         )
         
-        mock_upsert = MagicMock()
+        mock_upsert = AsyncMock()
         vector_store.client.upsert = mock_upsert
         
         await vector_store.upsert_chunks(
@@ -136,7 +136,7 @@ class TestTenantIsolation:
     @pytest.mark.asyncio
     async def test_delete_requires_tenant_match(self, vector_store):
         """Delete should filter by tenant ID."""
-        mock_delete = MagicMock()
+        mock_delete = AsyncMock()
         vector_store.client.delete = mock_delete
         
         await vector_store.delete_issue(

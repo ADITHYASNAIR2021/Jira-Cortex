@@ -26,7 +26,7 @@ class TestSecretDetector:
         sanitized, count = detector.detect_and_mask(text)
         
         assert "AKIAIOSFODNN7EXAMPLE" not in sanitized
-        assert "[" in sanitized and "REDACTED]" in sanitized
+        assert "AWS_KEY_REDACTED" in sanitized
         assert count >= 1
     
     def test_detect_github_token(self, detector):
@@ -49,6 +49,7 @@ class TestSecretDetector:
         sanitized, count = detector.detect_and_mask(text)
         
         assert "ATATT3x" not in sanitized
+        assert "ATLASSIAN_TOKEN_REDACTED" in sanitized
         assert count >= 1
     
     def test_preserve_normal_text(self, detector):
@@ -64,7 +65,8 @@ class TestSecretDetector:
         text = "api_key: 'a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6'"
         sanitized, count = detector.detect_and_mask(text)
         
-        assert "a1b2c3d4e5f6" not in sanitized
+        assert "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6" not in sanitized
+        assert "SECRET_REDACTED" in sanitized
 
 
 class TestHTMLCleaner:

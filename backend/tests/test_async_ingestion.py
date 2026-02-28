@@ -14,6 +14,7 @@ from app.services.background_processor import (
     IngestionJob,
     JobStatus
 )
+from app.services.billing import BillingService
 from app.models.schemas import JiraIssue, IssueStatus
 
 
@@ -184,6 +185,10 @@ class TestSingleIssueSync:
         mock_vector_store.upsert_chunks.return_value = 0
         mock_vector_store.delete_issue.return_value = 1
         
+        mock_billing = AsyncMock()
+        mock_billing.calculate_embedding_cost.return_value = 0.001
+        mock_billing.deduct_balance.return_value = True
+        
         monkeypatch.setattr(
             "app.services.background_processor.get_text_processor",
             lambda: mock_text_processor
@@ -196,8 +201,12 @@ class TestSingleIssueSync:
             "app.services.background_processor.get_vector_store",
             lambda: mock_vector_store
         )
+        monkeypatch.setattr(
+            "app.services.background_processor.get_billing_service",
+            lambda: mock_billing
+        )
         
-        return {"vector": mock_vector_store}
+        return {"vector": mock_vector_store, "billing": mock_billing}
     
     @pytest.mark.asyncio
     async def test_delete_event_removes_from_index(self, processor, sample_issue, mock_services):
@@ -208,7 +217,7 @@ class TestSingleIssueSync:
             event_type="deleted"
         )
         
-        assert result is True
+        assert result[0] is True
         mock_services["vector"].delete_issue.assert_called_once()
     
     @pytest.mark.asyncio
@@ -220,7 +229,7 @@ class TestSingleIssueSync:
             event_type="updated"
         )
         
-        assert result is True
+        assert result[0] is True
         # Delete should NOT be called for updates
         mock_services["vector"].delete_issue.assert_not_called()
 
