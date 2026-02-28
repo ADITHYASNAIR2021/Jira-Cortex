@@ -7,8 +7,7 @@ RAG query endpoint with ACL filtering, caching, billing, and rate limiting.
 import time
 import uuid
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Header, Request
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, HTTPException, Request
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 import structlog
@@ -21,11 +20,7 @@ from app.models.schemas import (
     Citation,
     UserContext
 )
-from app.auth.jwt_validator import (
-    get_jwt_validator, 
-    JWTValidationError,
-    AtlassianJWTValidator
-)
+
 from app.auth.dependencies import get_current_user
 from app.services.cache import get_cache_service, CacheService
 from app.services.llm import get_llm_service, LLMService, LLMServiceError

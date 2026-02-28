@@ -6,12 +6,12 @@ Saves token consumption to PostgreSQL for billing.
 """
 
 from datetime import datetime, date
-from typing import Optional, List
+from typing import Optional
 from contextlib import asynccontextmanager
 import structlog
 from sqlalchemy import (
     Column, String, Integer, DateTime, Boolean, Date, 
-    create_engine, Index, func
+    Index, func
 )
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base

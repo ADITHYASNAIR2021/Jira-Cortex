@@ -8,7 +8,6 @@ Handles checkout sessions, webhooks, and balance management.
 import stripe
 from fastapi import APIRouter, HTTPException, Request, Depends
 from pydantic import BaseModel
-from typing import Optional
 import structlog
 
 from app.config import get_settings
@@ -217,8 +216,6 @@ async def stripe_webhook(
     elif event_type == 'invoice.paid':
         subscription_id = data.get('subscription')
         if subscription_id:
-            # Extend subscription
-            customer_id = data.get('customer')
             # Look up tenant by Stripe customer ID
             await billing_service.extend_subscription(subscription_id)
     
