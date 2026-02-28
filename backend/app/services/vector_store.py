@@ -80,12 +80,13 @@ class VectorStore:
         
         try:
             # Check if collection exists
-            collections = self.client.get_collections()
+            client = await self.get_client()
+            collections = await client.get_collections()
             existing = [c.name for c in collections.collections]
             
             if collection_name not in existing:
                 # Create collection
-                self.client.create_collection(
+                await client.create_collection(
                     collection_name=collection_name,
                     vectors_config=models.VectorParams(
                         size=self.VECTOR_DIMENSIONS,
@@ -98,19 +99,19 @@ class VectorStore:
                 )
                 
                 # Create payload indexes for filtering
-                self.client.create_payload_index(
+                await client.create_payload_index(
                     collection_name=collection_name,
                     field_name="tenant_id",
                     field_schema=models.PayloadSchemaType.KEYWORD
                 )
                 
-                self.client.create_payload_index(
+                await client.create_payload_index(
                     collection_name=collection_name,
                     field_name="project_id",
                     field_schema=models.PayloadSchemaType.KEYWORD
                 )
                 
-                self.client.create_payload_index(
+                await client.create_payload_index(
                     collection_name=collection_name,
                     field_name="issue_key",
                     field_schema=models.PayloadSchemaType.KEYWORD
@@ -159,6 +160,7 @@ class VectorStore:
         
         try:
             points = []
+            client = await self.get_client()
             
             for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
                 point_id = str(uuid.uuid5(
@@ -197,7 +199,7 @@ class VectorStore:
                 ))
             
             # Upsert in batches
-            self.client.upsert(
+            await client.upsert(
                 collection_name=self.settings.qdrant_collection_name,
                 points=points,
                 wait=True
@@ -243,6 +245,7 @@ class VectorStore:
             return []
         
         try:
+            client = await self.get_client()
             # Build ACL filter: must match tenant AND one of the projects
             filter_conditions = models.Filter(
                 must=[
@@ -260,7 +263,7 @@ class VectorStore:
             )
             
             # Execute search
-            results = self.client.search(
+            results = await client.search(
                 collection_name=self.settings.qdrant_collection_name,
                 query_vector=query_embedding,
                 query_filter=filter_conditions,

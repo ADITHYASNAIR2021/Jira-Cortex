@@ -38,7 +38,7 @@ class TestACLFiltering:
         # Mock search to capture the filter
         mock_search = AsyncMock()
         mock_search.return_value = []
-        vector_store.client.search = mock_search
+        vector_store._client.search = mock_search
         
         await vector_store.search(
             query_embedding=[0.1] * 1536,
@@ -72,7 +72,7 @@ class TestACLFiltering:
             "metadata": {}
         }
         
-        vector_store.client.search = AsyncMock(return_value=[mock_result])
+        vector_store._client.search = AsyncMock(return_value=[mock_result])
         
         results = await vector_store.search(
             query_embedding=[0.1] * 1536,
@@ -110,7 +110,7 @@ class TestTenantIsolation:
         )
         
         mock_upsert = AsyncMock()
-        vector_store.client.upsert = mock_upsert
+        vector_store._client.upsert = mock_upsert
         
         await vector_store.upsert_chunks(
             chunks=[chunk],
@@ -137,7 +137,7 @@ class TestTenantIsolation:
     async def test_delete_requires_tenant_match(self, vector_store):
         """Delete should filter by tenant ID."""
         mock_delete = AsyncMock()
-        vector_store.client.delete = mock_delete
+        vector_store._client.delete = mock_delete
         
         await vector_store.delete_issue(
             tenant_id="tenant-1",
