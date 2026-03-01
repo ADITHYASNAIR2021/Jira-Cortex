@@ -35,6 +35,10 @@ yarn-error.log*
 htmlcov/
 .tox/
 .nox/
+coverage.xml
+pytest_*.txt
+test_errors.txt
+test_failures.txt
 
 # Build artifacts
 *.egg

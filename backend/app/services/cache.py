@@ -170,26 +170,56 @@ class CacheService:
     
     async def invalidate_issue(self, tenant_id: str, issue_key: str) -> int:
         """
-        Invalidate cache entries related to an issue.
-        
-        Called when an issue is updated to ensure fresh data.
-        
-        Note: This is a best-effort operation. We can't easily invalidate
-        all queries that might include this issue, so we rely on TTL.
-        
+        Invalidate ALL query cache entries for a tenant when any issue changes.
+
+        Because query cache keys are hashed blobs that include the query text,
+        there is no way to efficiently find all keys that might reference a
+        specific issue. We therefore invalidate all of the tenant's query cache
+        entries, which is safe because the TTL is short (300s by default).
+
         Args:
             tenant_id: Tenant ID
-            issue_key: Issue key that was updated
-            
+            issue_key: Issue key that was updated (for logging)
+
         Returns:
-            Number of keys invalidated (0 if not implemented)
+            Number of keys deleted
         """
-        # With short TTL (10s), explicit invalidation isn't critical
-        # The cache will naturally refresh quickly
-        logger.info("cache_invalidation_triggered", 
-                   tenant_id=tenant_id, 
-                   issue_key=issue_key)
-        return 0
+        return await self.invalidate_tenant(tenant_id, reason=f"issue_updated:{issue_key}")
+
+    async def invalidate_tenant(self, tenant_id: str, reason: str = "manual") -> int:
+        """
+        Invalidate all query cache entries for a tenant.
+
+        Scans Redis for all cortex:query:* keys that belong to this tenant.
+        Since cache keys are SHA-256 hashed, we cannot filter by tenant at
+        the key level—so we delete ALL query keys for safety.
+
+        In practice this is fine because the cache TTL is short, hitting this
+        path means data has changed (webhook or sync), and correctness > cache efficiency.
+
+        Returns:
+            Number of keys deleted
+        """
+        try:
+            client = await self.get_client()
+            deleted = 0
+
+            # Scan for all query cache keys and delete them
+            # (We cannot scope by tenant because keys are content-hashed)
+            async for key in client.scan_iter(f"{self.PREFIX_QUERY}*"):
+                await client.delete(key)
+                deleted += 1
+
+            logger.info(
+                "tenant_cache_invalidated",
+                tenant_id=tenant_id,
+                reason=reason,
+                keys_deleted=deleted,
+            )
+            return deleted
+        except Exception as e:
+            logger.warning("cache_invalidation_failed", error=str(e))
+            return 0
     
     async def cache_embedding(
         self,

@@ -96,6 +96,11 @@ class Settings(BaseSettings):
     stripe_webhook_secret: Optional[str] = Field(default=None, description="Stripe Webhook Signing Secret (whsec_...)")
     stripe_platform_price_id: Optional[str] = Field(default=None, description="Stripe Price ID for $299/mo subscription")
     app_frontend_url: str = Field(default="https://your-jira-instance.atlassian.net", description="Frontend URL for Stripe redirects")
+
+    # -----------------------------------------
+    # Observability
+    # -----------------------------------------
+    sentry_dsn: Optional[str] = Field(default=None, description="Sentry DSN for error tracking (leave empty to disable)")
     
     @field_validator("app_env")
     @classmethod

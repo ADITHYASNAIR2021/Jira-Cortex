@@ -4,9 +4,12 @@ Jira Cortex - Query Router
 RAG query endpoint with ACL filtering, caching, billing, and rate limiting.
 """
 
+import re
 import time
 import uuid
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, Field
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 import structlog
@@ -161,10 +164,17 @@ async def query(
             
             return cached_response
         
-        # Step 2: Generate query embedding
-        query_embedding, embedding_tokens = await llm_service.generate_embedding_with_usage(
-            query_request.query
-        )
+        # Step 2: Generate or retrieve cached query embedding
+        query_embedding = await cache_service.get_cached_embedding(query_request.query)
+        embedding_tokens = 0
+        if query_embedding is None:
+            query_embedding, embedding_tokens = await llm_service.generate_embedding_with_usage(
+                query_request.query
+            )
+            # Cache for 1 hour — query phrasing rarely changes
+            await cache_service.cache_embedding(query_request.query, query_embedding, ttl_seconds=3600)
+        else:
+            logger.debug("embedding_cache_hit", request_id=request_id)
         
         # Step 3: Search with ACL filter
         settings = get_settings()
@@ -310,3 +320,112 @@ async def query(
                 "request_id": request_id
             }
         )
+
+
+# =============================================================
+# New Feature Endpoints
+# =============================================================
+
+class FeedbackRequest(BaseModel):
+    """User feedback on a query response."""
+    query_hash: str = Field(..., description="Hash from query response (for lookup)")
+    vote: int = Field(..., ge=-1, le=1, description="-1=bad, 0=neutral, 1=good")
+    comment: Optional[str] = Field(default=None, max_length=500)
+
+
+@router.post("/feedback", tags=["query"])
+@limiter.limit("60/minute")
+async def submit_feedback(
+    request: Request,
+    feedback: FeedbackRequest,
+    user: UserContext = Depends(get_current_user),
+    cache_service: CacheService = Depends(get_cache_service)
+):
+    """
+    Submit 👍/👎 feedback on a RAG response.
+    Stores anonymized feedback for building a fine-tuning dataset.
+    """
+    import json, time
+    record = {
+        "query_hash": feedback.query_hash,
+        "vote": feedback.vote,
+        "comment": feedback.comment,
+        "tenant_id": user.tenant_id,
+        "timestamp": time.time()
+    }
+    try:
+        client = await cache_service.get_client()
+        feedback_key = f"cortex:feedback:{user.tenant_id}"
+        await client.lpush(feedback_key, json.dumps(record))
+        await client.ltrim(feedback_key, 0, 9999)          # Keep last 10k
+        await client.expire(feedback_key, 86400 * 90)     # 90-day retention
+        logger.info("feedback_recorded", tenant_id=user.tenant_id, vote=feedback.vote)
+        return {"status": "recorded", "message": "Thank you for your feedback!"}
+    except Exception as e:
+        logger.warning("feedback_store_failed", error=str(e))
+        return {"status": "accepted", "message": "Feedback received"}
+
+
+@router.get("/similar", tags=["query"])
+@limiter.limit("30/minute")
+async def find_similar_issues(
+    request: Request,
+    issue_key: str,
+    limit: int = 5,
+    threshold: float = 0.80,
+    user: UserContext = Depends(get_current_user),
+    vector_store: VectorStore = Depends(get_vector_store)
+):
+    """
+    Find issues semantically similar to the given issue key (duplicate detection).
+    Uses the stored vector embeddings to find related issues in the same tenant.
+    """
+    if not re.match(r'^[A-Z]+-\d+$', issue_key):
+        raise HTTPException(status_code=400, detail="Invalid issue key format (e.g. PROJ-123)")
+
+    results = await vector_store.search_similar(
+        issue_key=issue_key,
+        tenant_id=user.tenant_id,
+        project_access=user.project_access,
+        limit=limit,
+        score_threshold=threshold
+    )
+    return {
+        "source_issue": issue_key,
+        "similar_issues": [
+            {
+                "issue_key": r.issue_key,
+                "title": r.issue_title,
+                "url": r.url,
+                "similarity_score": round(r.score, 4)
+            }
+            for r in results
+        ],
+        "count": len(results)
+    }
+
+
+@router.get("/suggestions", tags=["query"])
+@limiter.limit("30/minute")
+async def get_query_suggestions(
+    request: Request,
+    limit: int = 5,
+    user: UserContext = Depends(get_current_user),
+    cache_service: CacheService = Depends(get_cache_service)
+):
+    """
+    Return top-K most queried questions for the tenant.
+    Powers the smart query suggestion chips in the OmniSearch UI.
+    """
+    try:
+        client = await cache_service.get_client()
+        suggestion_key = f"cortex:suggestions:{user.tenant_id}"
+        raw = await client.zrevrange(suggestion_key, 0, limit - 1, withscores=True)
+        suggestions = [
+            {"query": q.decode() if isinstance(q, bytes) else q, "count": int(s)}
+            for q, s in raw
+        ]
+        return {"suggestions": suggestions}
+    except Exception as e:
+        logger.warning("suggestions_fetch_failed", error=str(e))
+        return {"suggestions": []}

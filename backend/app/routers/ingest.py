@@ -5,6 +5,7 @@ Async batch ingestion and real-time webhook updates.
 Solves Trap 1 (Forge timeout) and Trap 2 (stale data).
 """
 
+import asyncio
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -39,7 +40,6 @@ limiter = Limiter(key_func=get_remote_address)
 
 
 
-
 @router.post(
     "/ingest/batch",
     response_model=IngestResponse,
@@ -58,7 +58,7 @@ limiter = Limiter(key_func=get_remote_address)
     Use the returned job_id to check status via /ingest/status/{job_id}.
     """
 )
-@limiter.limit("10/minute")  # FIXED: Rate limit batch ingestion
+@limiter.limit("10/minute")
 async def ingest_batch(
     request: Request,  # Required for rate limiter
     ingest_request: IngestBatchRequest,
@@ -229,20 +229,37 @@ async def ingest_confluence_batch(
     - Supports create, update, and delete events
     """
 )
-@limiter.limit("120/minute")  # FIXED: Rate limit webhook updates (higher limit)
+@limiter.limit("120/minute")
 async def ingest_single(
     request: Request,  # Required for rate limiter
     ingest_request: IngestSingleRequest,
     user: UserContext = Depends(get_current_user),
     processor: BackgroundProcessor = Depends(get_background_processor),
     cache_service: CacheService = Depends(get_cache_service),
-    billing_service: BillingService = Depends(get_billing_service)  # FIXED: Injected
+    billing_service: BillingService = Depends(get_billing_service)
 ) -> IngestResponse:
     """
     Process a single issue update from webhook.
-    
+
     This provides real-time sync when issues are updated in Jira.
+    Includes idempotency guard: duplicate Jira webhooks are silently ignored.
     """
+    settings = get_settings()
+
+    # Webhook idempotency: Jira can fire the same event multiple times.
+    # Build a stable event ID from tenant + issue key + updated timestamp.
+    event_id = f"jira:single:{ingest_request.tenant_id}:{ingest_request.issue.key}:{ingest_request.issue.updated.isoformat()}"
+    if await cache_service.is_event_processed(event_id):
+        logger.info(
+            "duplicate_webhook_ignored",
+            issue_key=ingest_request.issue.key,
+            tenant_id=ingest_request.tenant_id,
+        )
+        return IngestResponse(
+            job_id=f"single-{ingest_request.issue.key}",
+            status="skipped",
+            message=f"Duplicate webhook for {ingest_request.issue.key} — already processed"
+        )
     # CRITICAL: Check tenant subscription (prevents "free lunch" abuse)
     if not await billing_service.is_tenant_allowed(user.tenant_id):
         logger.warning("tenant_not_allowed_single", tenant_id=user.tenant_id)
@@ -287,7 +304,7 @@ async def ingest_single(
         )
         
         if success:
-            # FIXED: Record billing for single issue ingestion
+            # Record billing for single issue ingestion
             if tokens_used > 0:
                 await billing_service.record_usage(
                     tenant_id=user.tenant_id,
@@ -295,16 +312,19 @@ async def ingest_single(
                     operation="ingest",
                     input_tokens=tokens_used,
                     output_tokens=0,
-                    model="text-embedding-3-small",
+                    model=settings.openai_embedding_model,  # Read from config, not hardcoded
                     cached=False
                 )
-            
+
             # Invalidate cache for this issue and tenant
             await cache_service.invalidate_issue(
                 tenant_id=ingest_request.tenant_id,
                 issue_key=ingest_request.issue.key
             )
             await cache_service.invalidate_tenant(ingest_request.tenant_id)
+
+            # Mark as processed for idempotency (keep for 24h)
+            await cache_service.mark_event_processed(event_id)
             
             logger.info(
                 "single_issue_ingested",
@@ -421,7 +441,7 @@ async def provision_tenant_data(
     },
     summary="Get ingestion job status"
 )
-@limiter.limit("120/minute")  # FIXED: Rate limit status checks
+@limiter.limit("120/minute")
 async def get_job_status(
     request: Request,  # Required for rate limiter
     job_id: str,
@@ -459,3 +479,60 @@ async def get_job_status(
         "completed_at": job.completed_at.isoformat() if job.completed_at else None,
         "error": job.error_message
     }
+
+
+@router.post("/resync", tags=["admin"])
+@limiter.limit("5/minute")
+async def resync_all(
+    request: Request,
+    data: IngestBatchRequest,
+    user: UserContext = Depends(get_current_user),
+    processor: BackgroundProcessor = Depends(get_background_processor),
+    billing_service: BillingService = Depends(get_billing_service),
+    cache_service: CacheService = Depends(get_cache_service)
+) -> IngestResponse:
+    """
+    Trigger a full re-index for a tenant.
+
+    Accepts a batch of issues and re-ingests them from scratch after clearing
+    the tenant cache. Use this for scheduled sync from a Forge scheduled trigger.
+    """
+    settings = get_settings()
+
+    if not await billing_service.is_tenant_allowed(user.tenant_id):
+        raise HTTPException(status_code=402, detail="Active subscription required for resync")
+
+    if not await billing_service.has_sufficient_funds(user.tenant_id, estimate=0.10):
+        raise HTTPException(status_code=402, detail="Insufficient credits for resync operation")
+
+    # Invalidate entire tenant cache before re-index
+    await cache_service.invalidate_tenant(user.tenant_id, reason="resync_triggered")
+
+    # Create background job
+    job = await processor.create_job(
+        tenant_id=user.tenant_id,
+        issue_count=len(data.issues)
+    )
+
+    # Kick off background re-processing
+    asyncio.create_task(
+        processor.process_batch_async(
+            job_id=job.job_id,
+            issues=data.issues,
+            tenant_id=user.tenant_id,
+        )
+    )
+
+    logger.info(
+        "resync_started",
+        tenant_id=user.tenant_id,
+        job_id=job.job_id,
+        issue_count=len(data.issues)
+    )
+
+    return IngestResponse(
+        job_id=job.job_id,
+        status="accepted",
+        message=f"Re-sync started for {len(data.issues)} issues",
+        estimated_completion_seconds=processor.estimate_completion_time(len(data.issues))
+    )

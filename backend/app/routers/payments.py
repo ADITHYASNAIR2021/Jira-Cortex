@@ -12,6 +12,7 @@ import structlog
 
 from app.config import get_settings
 from app.services.billing import get_billing_service, BillingService
+from app.services.cache import get_cache_service, CacheService
 from app.auth.dependencies import get_current_user
 from app.models.schemas import UserContext
 
@@ -19,7 +20,7 @@ logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/api/v1/billing", tags=["billing"])
 
-# Remove global stripe initialization
+settings = get_settings()
 
 
 # -----------------------------------------
@@ -54,14 +55,14 @@ async def get_wallet(
     Get current wallet balance and status.
     """
     wallet = await billing_service.get_wallet(user.tenant_id)
-    
+
     if not wallet:
         # Create wallet if doesn't exist
         wallet = await billing_service.create_wallet(user.tenant_id)
-    
+
     return WalletResponse(
         tenant_id=wallet.tenant_id,
-        balance=wallet.balance,
+        balance=float(wallet.balance),
         currency=wallet.currency,
         is_active=wallet.is_active,
         auto_recharge=wallet.auto_recharge
@@ -75,7 +76,7 @@ async def create_checkout_session(
 ):
     """
     Creates a Stripe Checkout page for the user to pay.
-    
+
     Supports:
     - Credits purchase (one-time payment)
     - Platform subscription ($299/mo)
@@ -85,16 +86,21 @@ async def create_checkout_session(
             status_code=503,
             detail="Stripe is not configured. Contact support."
         )
-    
+
     stripe.api_key = settings.stripe_secret_key
-    
+
     try:
         if request_body.product_type == "subscription":
+            if not settings.stripe_platform_price_id:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Stripe subscription price is not configured."
+                )
             # Platform Fee ($299/mo subscription)
             session = stripe.checkout.Session.create(
                 payment_method_types=['card'],
                 line_items=[{
-                    'price': settings.stripe_platform_price_id,  # Pre-configured in Stripe
+                    'price': settings.stripe_platform_price_id,
                     'quantity': 1,
                 }],
                 mode='subscription',
@@ -131,16 +137,16 @@ async def create_checkout_session(
                     'amount': str(request_body.amount)
                 }
             )
-        
+
         logger.info(
             "checkout_session_created",
             tenant_id=user.tenant_id,
             session_id=session.id,
             type=request_body.product_type
         )
-        
+
         return {"url": session.url, "session_id": session.id}
-        
+
     except stripe.error.StripeError as e:
         logger.error("stripe_error", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
@@ -154,7 +160,7 @@ async def stripe_webhook(
 ):
     """
     Stripe webhook endpoint.
-    
+
     Handles:
     - checkout.session.completed: Add credits or activate subscription
     - invoice.paid: Subscription renewal
@@ -162,12 +168,12 @@ async def stripe_webhook(
     """
     if not settings.stripe_webhook_secret or not settings.stripe_secret_key:
         raise HTTPException(status_code=503, detail="Webhook not configured")
-        
+
     stripe.api_key = settings.stripe_secret_key
-    
+
     payload = await request.body()
     sig_header = request.headers.get('stripe-signature')
-    
+
     try:
         event = stripe.Webhook.construct_event(
             payload, sig_header, settings.stripe_webhook_secret
@@ -178,17 +184,27 @@ async def stripe_webhook(
     except stripe.error.SignatureVerificationError:
         logger.error("webhook_invalid_signature")
         raise HTTPException(status_code=400, detail="Invalid signature")
-    
+
+    event_id = event.get('id', '')
     event_type = event['type']
     data = event['data']['object']
-    
-    logger.info("stripe_webhook_received", event_type=event_type)
-    
+
+    logger.info("stripe_webhook_received", event_type=event_type, event_id=event_id)
+
+    # Idempotency guard: skip if already processed
+    if event_id and await cache_service.is_event_processed(event_id):
+        logger.info("stripe_webhook_already_processed", event_id=event_id)
+        return {"status": "already_processed"}
+
     # Handle checkout completion
     if event_type == 'checkout.session.completed':
         tenant_id = data.get('client_reference_id')
         metadata = data.get('metadata', {})
-        
+
+        if not tenant_id:
+            logger.error("webhook_missing_tenant_id", event_type=event_type)
+            return {"status": "error", "detail": "Missing tenant_id"}
+
         if metadata.get('type') == 'subscription':
             # Activate platform subscription
             subscription_id = data.get('subscription')
@@ -196,37 +212,41 @@ async def stripe_webhook(
                 tenant_id=tenant_id,
                 subscription_id=subscription_id
             )
-            logger.info("subscription_activated", tenant_id=tenant_id)
-            
+            logger.info("subscription_activated_via_webhook", tenant_id=tenant_id)
+
         else:
             # Add credits
             amount_cents = data.get('amount_total', 0)
             amount_dollars = amount_cents / 100.0
-            
+
             await billing_service.add_credits(
                 tenant_id=tenant_id,
                 amount=amount_dollars,
                 stripe_session_id=data.get('id')
             )
             logger.info(
-                "credits_added",
+                "credits_added_via_webhook",
                 tenant_id=tenant_id,
                 amount=amount_dollars
             )
-    
+
     # Handle subscription renewal
     elif event_type == 'invoice.paid':
         subscription_id = data.get('subscription')
         if subscription_id:
-            # Look up tenant by Stripe customer ID
             await billing_service.extend_subscription(subscription_id)
-    
+            logger.info("subscription_renewed", subscription_id=subscription_id)
+
     # Handle subscription cancellation
     elif event_type == 'customer.subscription.deleted':
         subscription_id = data.get('id')
         await billing_service.deactivate_subscription(subscription_id)
         logger.warning("subscription_cancelled", subscription_id=subscription_id)
-    
+
+    # Mark event as processed (idempotency)
+    if event_id:
+        await cache_service.mark_event_processed(event_id)
+
     return {"status": "success"}
 
 
@@ -243,12 +263,12 @@ async def get_transactions(
         tenant_id=user.tenant_id,
         limit=limit
     )
-    
+
     return {
         "transactions": [
             {
                 "id": t.id,
-                "amount": t.amount,
+                "amount": float(t.amount),
                 "type": t.type,
                 "description": t.description,
                 "status": t.status,
@@ -267,22 +287,22 @@ async def estimate_sync_cost(
 ):
     """
     Estimate the cost of syncing a given number of issues.
-    
+
     Used by Admin UI to show cost before starting sync.
     """
     # Approximate tokens per issue (summary + description + comments)
     avg_tokens_per_issue = 500
     total_tokens = issue_count * avg_tokens_per_issue
-    
+
     # Get current pricing
     cost = billing_service.calculate_embedding_cost(total_tokens)
     balance = await billing_service.get_balance(user.tenant_id)
-    
+
     return {
         "issue_count": issue_count,
         "estimated_tokens": total_tokens,
-        "estimated_cost": round(cost, 2),
+        "estimated_cost": round(cost, 4),
         "current_balance": round(balance, 2),
         "sufficient_funds": balance >= cost,
-        "shortfall": round(max(0, cost - balance), 2)
+        "shortfall": round(max(0, cost - balance), 4)
     }

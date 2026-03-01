@@ -28,6 +28,16 @@ logger = structlog.get_logger(__name__)
 
 Base = declarative_base()
 
+# -----------------------------------------
+# Pricing Constants (single source of truth)
+# -----------------------------------------
+PRICING = {
+    # OpenAI text-embedding-3-small: $0.02 per 1M tokens
+    "embedding_cost_per_million": 0.02,
+    # GPT-4o-mini: $0.15/1M input, $0.60/1M output
+    "chat_input_cost_per_million": 0.15,
+    "chat_output_cost_per_million": 0.60,
+}
 
 class UsageRecord(Base):
     """
@@ -287,9 +297,8 @@ class BillingService:
         if "error" in usage:
             return usage
         
-        # Calculate cost (example pricing)
-        input_cost = (usage["usage"]["input_tokens"] / 1000) * 0.01
-        output_cost = (usage["usage"]["output_tokens"] / 1000) * 0.03
+        input_cost = (usage["usage"]["input_tokens"] / 1_000_000) * PRICING["chat_input_cost_per_million"]
+        output_cost = (usage["usage"]["output_tokens"] / 1_000_000) * PRICING["chat_output_cost_per_million"]
         total_cost = input_cost + output_cost
         
         return {
@@ -592,15 +601,12 @@ class BillingService:
     
     def calculate_embedding_cost(self, token_count: int) -> float:
         """Calculate cost for embedding tokens (text-embedding-3-small)."""
-        # OpenAI pricing: $0.02 per 1M tokens for text-embedding-3-small
-        cost_per_million = 0.02
-        return (token_count / 1_000_000) * cost_per_million
-    
+        return (token_count / 1_000_000) * PRICING["embedding_cost_per_million"]
+
     def calculate_query_cost(self, input_tokens: int, output_tokens: int) -> float:
         """Calculate cost for LLM query (gpt-4o-mini)."""
-        # OpenAI pricing: $0.15/1M input, $0.60/1M output for gpt-4o-mini
-        input_cost = (input_tokens / 1_000_000) * 0.15
-        output_cost = (output_tokens / 1_000_000) * 0.60
+        input_cost = (input_tokens / 1_000_000) * PRICING["chat_input_cost_per_million"]
+        output_cost = (output_tokens / 1_000_000) * PRICING["chat_output_cost_per_million"]
         return input_cost + output_cost
     
     async def close(self) -> None:

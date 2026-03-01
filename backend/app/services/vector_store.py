@@ -93,6 +93,11 @@ class VectorStore:
                         size=self.VECTOR_DIMENSIONS,
                         distance=models.Distance.COSINE
                     ),
+                    # Tune HNSW for better precision/recall on large datasets
+                    hnsw_config=models.HnswConfigDiff(
+                        m=16,             # Number of edges per node (higher = better recall, more RAM)
+                        ef_construct=200, # Candidates during index building (higher = better quality index)
+                    ),
                     # Enable on-disk storage for large datasets
                     optimizers_config=models.OptimizersConfigDiff(
                         indexing_threshold=10000
@@ -301,6 +306,123 @@ class VectorStore:
             logger.error("search_failed", error=str(e))
             raise VectorStoreError(f"Search failed: {e}")
     
+    async def search_similar(
+        self,
+        issue_key: str,
+        tenant_id: str,
+        project_access: List[str],
+        limit: int = 5,
+        score_threshold: float = 0.80,
+    ) -> List[SearchResult]:
+        """
+        Find issues similar to an existing issue using its stored vectors.
+
+        Uses the average embedding of all chunks belonging to the source issue
+        to find other similar issues (duplicate detection).
+
+        Args:
+            issue_key: Source issue key to find similarities for
+            tenant_id: Tenant for ACL isolation
+            project_access: Projects the user can read
+            limit: Max results (excluding the source issue)
+            score_threshold: Minimum similarity score (0.80 = very similar)
+
+        Returns:
+            List of similar SearchResult objects (source issue excluded)
+        """
+        try:
+            client = await self.get_client()
+
+            # Fetch stored vectors for the source issue
+            source_filter = models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="tenant_id",
+                        match=models.MatchValue(value=tenant_id)
+                    ),
+                    models.FieldCondition(
+                        key="issue_key",
+                        match=models.MatchValue(value=issue_key)
+                    )
+                ]
+            )
+            source_points = await client.scroll(
+                collection_name=self.settings.qdrant_collection_name,
+                scroll_filter=source_filter,
+                with_vectors=True,
+                with_payload=False,
+                limit=10,
+            )
+
+            if not source_points[0]:
+                logger.warning("similar_search_source_not_found", issue_key=issue_key)
+                return []
+
+            # Average the vectors from all chunks
+            import numpy as np
+            vectors = [p.vector for p in source_points[0] if p.vector is not None]
+            if not vectors:
+                return []
+            avg_vector = list(np.mean(vectors, axis=0))
+
+            # Search for similar issues, excluding the source issue
+            filter_conditions = models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="tenant_id",
+                        match=models.MatchValue(value=tenant_id)
+                    ),
+                    models.FieldCondition(
+                        key="project_id",
+                        match=models.MatchAny(any=project_access)
+                    )
+                ],
+                must_not=[
+                    models.FieldCondition(
+                        key="issue_key",
+                        match=models.MatchValue(value=issue_key)
+                    )
+                ]
+            )
+
+            results = await client.search(
+                collection_name=self.settings.qdrant_collection_name,
+                query_vector=avg_vector,
+                query_filter=filter_conditions,
+                limit=limit,
+                score_threshold=score_threshold,
+                with_payload=True
+            )
+
+            search_results = []
+            seen_keys = set()
+            for result in results:
+                payload = result.payload or {}
+                key = payload.get("issue_key", "")
+                if key and key not in seen_keys:
+                    seen_keys.add(key)
+                    search_results.append(SearchResult(
+                        id=str(result.id),
+                        content=payload.get("content", ""),
+                        score=result.score,
+                        issue_key=key,
+                        issue_title=payload.get("issue_title", ""),
+                        project_id=payload.get("project_id", ""),
+                        url=payload.get("issue_url", ""),
+                        metadata=payload.get("metadata", {})
+                    ))
+
+            logger.info(
+                "similar_search_completed",
+                source_key=issue_key,
+                results_found=len(search_results)
+            )
+            return search_results
+
+        except Exception as e:
+            logger.error("similar_search_failed", issue_key=issue_key, error=str(e))
+            raise VectorStoreError(f"Similar search failed: {e}")
+
     async def delete_issue(self, tenant_id: str, issue_key: str) -> int:
         """
         Delete all chunks for an issue.

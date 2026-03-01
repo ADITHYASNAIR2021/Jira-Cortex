@@ -7,7 +7,7 @@ Type-safe request/response models with validation.
 from datetime import datetime, timezone
 from enum import Enum
 from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, Field, field_validator, field_validator
+from pydantic import BaseModel, Field, field_validator
 import re
 
 def utc_now():
