@@ -32,13 +32,11 @@ class TestACLFiltering:
         
         assert results == []
     
-    @pytest.mark.skip(reason="Temporarily disabled passing CI")
     @pytest.mark.asyncio
     async def test_search_builds_correct_filter(self, vector_store):
         """Search should build proper ACL filter."""
         # Mock search to capture the filter
-        mock_search = AsyncMock()
-        mock_search.return_value = []
+        mock_search = AsyncMock(return_value=[])
         vector_store._client.search = mock_search
         
         await vector_store.search(
@@ -51,13 +49,15 @@ class TestACLFiltering:
         # Verify search was called
         assert mock_search.called
         
-        # Check filter structure
-        call_args = mock_search.call_args
-        query_filter = call_args.kwargs.get('query_filter') or call_args[1].get('query_filter')
+        # Check filter structure — vector_store.search passes query_filter as kwarg
+        call_kwargs = mock_search.call_args.kwargs
+        query_filter = call_kwargs.get("query_filter")
         
         assert query_filter is not None
+        # Should have must conditions: tenant_id + project_id
+        assert hasattr(query_filter, "must")
+        assert len(query_filter.must) == 2
     
-    @pytest.mark.skip(reason="Temporarily disabled passing CI")
     @pytest.mark.asyncio
     async def test_results_include_all_metadata(self, vector_store):
         """Search results should include all required metadata."""
@@ -79,13 +79,15 @@ class TestACLFiltering:
         results = await vector_store.search(
             query_embedding=[0.1] * 1536,
             tenant_id="tenant-1",
-            project_access=["PROJ-1"],
+            project_access=["10001"],
             limit=3
         )
         
         assert len(results) == 1
         assert results[0].issue_key == "PROJ-123"
         assert results[0].score == 0.85
+        assert results[0].content == "Issue content"
+        assert results[0].url == "https://jira.atlassian.net/browse/PROJ-123"
 
 
 class TestTenantIsolation:
@@ -98,7 +100,6 @@ class TestTenantIsolation:
         store._client = AsyncMock()
         return store
     
-    @pytest.mark.skip(reason="Temporarily disabled passing CI")
     @pytest.mark.asyncio
     async def test_upsert_includes_tenant_id(self, vector_store):
         """Upsert should tag documents with tenant ID."""
@@ -112,7 +113,7 @@ class TestTenantIsolation:
             content_hash="abc123"
         )
         
-        mock_upsert = AsyncMock()
+        mock_upsert = AsyncMock(return_value=None)
         vector_store._client.upsert = mock_upsert
         
         await vector_store.upsert_chunks(
@@ -125,22 +126,22 @@ class TestTenantIsolation:
             issue_url="https://example.com/PROJ-123"
         )
         
-        # Verify upsert was called
         assert mock_upsert.called
         
-        # Check that points include tenant_id in payload
-        call_args = mock_upsert.call_args
-        points = call_args.kwargs.get('points') or call_args[1].get('points')
+        # Points are passed as kwarg
+        call_kwargs = mock_upsert.call_args.kwargs
+        points = call_kwargs.get("points")
         
+        assert points is not None
         assert len(points) == 1
-        assert points[0].payload['tenant_id'] == 'tenant-1'
-        assert points[0].payload['project_id'] == '10001'
+        assert points[0].payload["tenant_id"] == "tenant-1"
+        assert points[0].payload["project_id"] == "10001"
+        assert points[0].payload["issue_key"] == "PROJ-123"
     
-    @pytest.mark.skip(reason="Temporarily disabled passing CI")
     @pytest.mark.asyncio
     async def test_delete_requires_tenant_match(self, vector_store):
         """Delete should filter by tenant ID."""
-        mock_delete = AsyncMock()
+        mock_delete = AsyncMock(return_value=None)
         vector_store._client.delete = mock_delete
         
         await vector_store.delete_issue(
@@ -150,7 +151,14 @@ class TestTenantIsolation:
         
         assert mock_delete.called
         
-        # Verify filter includes tenant_id
+        # Verify filter includes both tenant_id and issue_key
+        call_kwargs = mock_delete.call_args.kwargs
+        points_selector = call_kwargs.get("points_selector")
+        assert points_selector is not None
+        must_conditions = points_selector.filter.must
+        keys = [c.key for c in must_conditions]
+        assert "tenant_id" in keys
+        assert "issue_key" in keys
 
 
 class TestCacheKeyACL:
