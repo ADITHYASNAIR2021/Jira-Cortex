@@ -51,7 +51,7 @@ limiter = Limiter(key_func=get_remote_address)
     summary="Query the knowledge base",
     description="Ask questions about your Jira issues and get AI-powered answers with citations."
 )
-@limiter.limit("60/minute")  # FIXED: Rate limiting applied
+@limiter.limit("60/minute")
 async def query(
     request: Request,  # Required for rate limiter
     query_request: QueryRequest,
@@ -59,7 +59,7 @@ async def query(
     cache_service: CacheService = Depends(get_cache_service),
     llm_service: LLMService = Depends(get_llm_service),
     vector_store: VectorStore = Depends(get_vector_store),
-    billing_service: BillingService = Depends(get_billing_service)  # FIXED: Injected
+    billing_service: BillingService = Depends(get_billing_service)
 ) -> QueryResponse:
     """
     Process a natural language query using RAG.
@@ -345,7 +345,8 @@ async def submit_feedback(
     Submit 👍/👎 feedback on a RAG response.
     Stores anonymized feedback for building a fine-tuning dataset.
     """
-    import json, time
+    import json
+    import time
     record = {
         "query_hash": feedback.query_hash,
         "vote": feedback.vote,

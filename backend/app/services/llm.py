@@ -8,7 +8,7 @@ from typing import List, Optional, Tuple
 from dataclasses import dataclass
 import structlog
 from openai import AsyncOpenAI, OpenAIError
-from functools import lru_cache
+
 from fastapi import Request
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 

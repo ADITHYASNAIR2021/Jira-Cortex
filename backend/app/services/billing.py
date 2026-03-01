@@ -17,7 +17,7 @@ from fastapi import Request
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy.future import select
-from functools import lru_cache
+
 
 from app.config import get_settings
 

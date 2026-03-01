@@ -497,8 +497,6 @@ async def resync_all(
     Accepts a batch of issues and re-ingests them from scratch after clearing
     the tenant cache. Use this for scheduled sync from a Forge scheduled trigger.
     """
-    settings = get_settings()
-
     if not await billing_service.is_tenant_allowed(user.tenant_id):
         raise HTTPException(status_code=402, detail="Active subscription required for resync")
 

@@ -8,8 +8,8 @@ import json
 import hashlib
 from typing import Optional
 import structlog
-from functools import lru_cache
 import redis.asyncio as redis
+from fastapi import Request
 
 from app.config import get_settings
 from app.models.schemas import QueryResponse

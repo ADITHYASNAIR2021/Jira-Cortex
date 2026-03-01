@@ -5,7 +5,7 @@ Pre-paid wallet system for tenant billing.
 Part of the "Financial Fortress" architecture.
 """
 
-from sqlalchemy import Column, String, Float, Boolean, DateTime, Integer, ForeignKey, Numeric
+from sqlalchemy import Column, String, Boolean, DateTime, Integer, ForeignKey, Numeric
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 
