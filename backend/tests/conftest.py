@@ -91,8 +91,9 @@ def mock_billing_service():
     mock.has_sufficient_funds.return_value = True
     mock.deduct_balance.return_value = True
     mock.record_usage.return_value = None
-    mock.calculate_embedding_cost.return_value = 0.001
-    mock.calculate_query_cost.return_value = 0.002
+    # These are sync methods — use MagicMock to avoid unawaited coroutine warnings
+    mock.calculate_embedding_cost = MagicMock(return_value=0.001)
+    mock.calculate_query_cost = MagicMock(return_value=0.002)
     mock.get_balance.return_value = 100.0
     return mock
 

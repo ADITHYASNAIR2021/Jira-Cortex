@@ -132,9 +132,13 @@ class SecretDetector:
                 
         except Exception as e:
             logger.error("secret_detection_error", error=str(e))
-            # On error, still try to apply basic patterns
+            # On error, still apply regex patterns and count matches
             for pattern, replacement in self.ADDITIONAL_PATTERNS:
-                sanitized = re.sub(pattern, replacement, sanitized, flags=re.IGNORECASE)
+                matches = re.findall(pattern, sanitized, flags=re.IGNORECASE)
+                if matches:
+                    secrets_found += len(matches)
+                repl = "[SECRET_REDACTED]" if "MASKED" in replacement else replacement
+                sanitized = re.sub(pattern, repl, sanitized, flags=re.IGNORECASE)
         
         return sanitized, secrets_found
 
