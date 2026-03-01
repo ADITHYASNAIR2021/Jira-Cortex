@@ -13,10 +13,6 @@ import structlog
 from bs4 import BeautifulSoup
 import tiktoken
 
-# Use detect-secrets for robust secret detection
-from detect_secrets import SecretsCollection
-from detect_secrets.settings import transient_settings
-
 from app.config import get_settings
 
 logger = structlog.get_logger(__name__)
@@ -63,83 +59,32 @@ class SecretDetector:
         
     def detect_and_mask(self, text: str) -> Tuple[str, int]:
         """
-        Detect secrets in text and mask them.
-        
+        Detect secrets in text and mask them using regex patterns.
+
         Args:
             text: Input text to scan
-            
+
         Returns:
             Tuple of (sanitized_text, secrets_found_count)
         """
         secrets_found = 0
         sanitized = text
-        
+
         try:
-            # Use detect-secrets inline scanning
-            with transient_settings({
-                'plugins_used': [
-                    {'name': 'AWSKeyDetector'},
-                    {'name': 'ArtifactoryDetector'},
-                    {'name': 'AzureStorageKeyDetector'},
-                    {'name': 'BasicAuthDetector'},
-                    {'name': 'CloudantDetector'},
-                    {'name': 'DiscordBotTokenDetector'},
-                    {'name': 'GitHubTokenDetector'},
-                    {'name': 'IbmCloudIamDetector'},
-                    {'name': 'IbmCosHmacDetector'},
-                    {'name': 'JwtTokenDetector'},
-                    {'name': 'MailchimpDetector'},
-                    {'name': 'NpmDetector'},
-                    {'name': 'PrivateKeyDetector'},
-                    {'name': 'SendGridDetector'},
-                    {'name': 'SlackDetector'},
-                    {'name': 'SoftlayerDetector'},
-                    {'name': 'SquareOAuthDetector'},
-                    {'name': 'StripeDetector'},
-                    {'name': 'TwilioKeyDetector'},
-                ]
-            }):
-                secrets = SecretsCollection()
-                secrets.scan_string(text)
-                
-                # Build list of secret positions and mask them
-                for file_path, secrets_list in secrets.data.items():
-                    for secret in secrets_list:
-                        secrets_found += 1
-                        # Mask the secret value
-                        secret_type = secret.type.replace('Detector', '').upper()
-                        mask = f'[{secret_type}_REDACTED]'
-                        
-                        # Replace the secret in text
-                        secret_value = secret.secret_value
-                        if secret_value:
-                            sanitized = sanitized.replace(secret_value, mask)
-            
-            # Apply additional patterns
             for pattern, replacement in self.ADDITIONAL_PATTERNS:
                 matches = re.finditer(pattern, sanitized, flags=re.IGNORECASE)
                 match_count = sum(1 for _ in matches)
                 if match_count > 0:
                     secrets_found += match_count
-                    if "MASKED" in replacement:
-                        # For the generic pattern, just replace with the redacted string
-                        sanitized = re.sub(pattern, '[SECRET_REDACTED]', sanitized, flags=re.IGNORECASE)
-                    else:
-                        sanitized = re.sub(pattern, replacement, sanitized, flags=re.IGNORECASE)
-            
+                    repl = "[SECRET_REDACTED]" if "MASKED" in replacement else replacement
+                    sanitized = re.sub(pattern, repl, sanitized, flags=re.IGNORECASE)
+
             if secrets_found > 0:
                 logger.warning("secrets_detected_and_masked", count=secrets_found)
-                
+
         except Exception as e:
             logger.error("secret_detection_error", error=str(e))
-            # On error, still apply regex patterns and count matches
-            for pattern, replacement in self.ADDITIONAL_PATTERNS:
-                matches = re.findall(pattern, sanitized, flags=re.IGNORECASE)
-                if matches:
-                    secrets_found += len(matches)
-                repl = "[SECRET_REDACTED]" if "MASKED" in replacement else replacement
-                sanitized = re.sub(pattern, repl, sanitized, flags=re.IGNORECASE)
-        
+
         return sanitized, secrets_found
 
 
