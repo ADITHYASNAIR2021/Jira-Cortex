@@ -209,7 +209,9 @@ class TextChunker:
                 content_hash=self._hash_content(chunk_text, doc_id, chunk_index)
             ))
             
-            # Move start with overlap
+            # Move start with overlap; stop if we've consumed all tokens
+            if end >= total_tokens:
+                break
             start = end - self.overlap
             chunk_index += 1
         
